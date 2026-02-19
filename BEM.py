@@ -54,7 +54,7 @@ dimensionlessRadialPosition = lambda radius: radius / tipRadius
 # Aerodynamic    
 freeStreamVelocity = 10.0 # m/s
 tipSpeedRatio = 6.0 # TODO include all three TSRs
-rotationalSpeed = lambda radius: tipSpeedRatio * freeStreamVelocity * dimensionlessRadialPosition(radius) # rad/s
+rotationalSpeed = tipSpeedRatio * freeStreamVelocity / tipRadius # rad/s
 # Fluid properties for air at sea level
 airDensity = 1.225 # kg/m^3
 airViscosity = 1.81e-5 # kg/m/s
@@ -147,9 +147,9 @@ def solveElement(radius):
     a, aPrime = SolveInduction(radius)
     dCax, dCtg = BEMElement(radius, a, aPrime)
 
-    totalVelocity = freeStreamVelocity * (1 - a)
+    relativeVelocity = np.sqrt((freeStreamVelocity * (1 - a))**2 + (rotationalSpeed(radius) * radius * (1 + aPrime))**2)
 
-    dT = 0.5 * airDensity * totalVelocity**2 * bladeNumber * chordFunction(radius) * dCax
-    dQ = 0.5 * airDensity * totalVelocity**2 * bladeNumber * chordFunction(radius) * radius * dCtg
+    dT = 0.5 * airDensity * relativeVelocity**2 * bladeNumber * chordFunction(radius) * dCax
+    dQ = 0.5 * airDensity * relativeVelocity**2 * bladeNumber * chordFunction(radius) * radius * dCtg
 
     return dT, dQ

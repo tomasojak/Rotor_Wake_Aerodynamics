@@ -1,7 +1,9 @@
-# Assignment AE4135 Rotor/wake aerodynamics
+# Assignment 1; AE4135 Rotor/wake aerodynamics
 # BEM Assignment
 #
-# Author: Tomas Jakus
+# Authors: - Tomas Jakus
+#          - 
+#          - 
 #
 # This code implements the Blade Element Momentum (BEM) method for calculating the aerodynamic performance of a wind turbine rotor.
 # including Glauert correction for high axial induction factors and Prandtl's tip loss correction.
@@ -11,8 +13,10 @@ import pandas as pd
 
 EPSILON = 1e-6
 
-# We want a handy way to load airfoil data from a file (or keep local capabilityto define it in code)
+# We want a handy way to load airfoil data from a file (or keep local capability to define it in code)
 class Airfoil:
+
+    # Loads the values from an external file
     def __init__(self, filename):
         self.data = pd.read_csv(filename)
         # Input in CSV is in degrees; convert once so internals use radians.
@@ -36,10 +40,10 @@ class Airfoil:
         return self.lookup(alpha, 'cl'), self.lookup(alpha, 'cd'), self.lookup(alpha, 'cm')
     
 class SolutionProperties:
-
     # Store convergence history
     def __init__(self):
         self.elements = []
+        # NOTE: Maybe this should be kept separately from the solution
         self.maxIterations = 100
         self.tolerance = 1e-6
         self.relaxation = 0.5
@@ -47,7 +51,8 @@ class SolutionProperties:
 
         self.initialGuess = {
             "a": 0.3,
-            "aPrime": 0.01}
+            "aPrime": 0.01
+            }
     
     def setParameters(self, maxIterations, tolerance, relaxation, elementCount):
         self.maxIterations = maxIterations
@@ -55,7 +60,7 @@ class SolutionProperties:
         self.relaxation = relaxation
         self.elementCount = elementCount
 
-    def addSolution(self, radius, a, aPrime, iterations, precision):
+    def addSolutionIteration(self, radius, a, aPrime, iterations, precision):
         self.elements.append({
             "radius": radius,
             "a": a,
@@ -65,6 +70,10 @@ class SolutionProperties:
             "converged": precision < self.tolerance
         })
 
+    # TODO: We want to keep all of the solution variables in one struct to then have easy access to solutions of all TSRs, to do this we should:
+    #           - Create a handy struct to hold the information
+    #           - Hold each TSR solution in a separate "solutionProperties" instance
+
     def getConvergence(self, radius):
         for element in self.elements:
             if element["radius"] == radius:
@@ -72,7 +81,7 @@ class SolutionProperties:
         return None # Not found
 
 #region Parameters
-# I do not like keeping magic numbers here but seems most convinient to keep away from main
+# I do not like keeping magic numbers here but seems most convenient to keep away from main
 
 # Geometric
 tipRadius = 50.0  # m
@@ -105,9 +114,11 @@ def PitchAngle(radius):
 def PrandtlTipLoss(radius, a):
     if radius == tipRadius:
         return 0.0 # At the tip, the correction converges to zero
+    
     d = ((2 * np.pi * radius) / bladeNumber) * (1 - a) / np.sqrt(tipSpeedRatio**2 + (1 - a)**2)
     argument = np.exp(-np.pi * (1-radius/tipRadius) / d)
-    # Clamp argument to avoid numerical issues with arccos
+    # HACK: Clamp argument to avoid numerical issues with arccos
+    # We might be hitting some unities here around the tip
     argument = np.clip(argument, EPSILON, 1 - EPSILON)
     f = (2/np.pi) * np.arccos(argument)
     return f
@@ -115,6 +126,7 @@ def PrandtlTipLoss(radius, a):
 # Induction will decrease the axial velocity at the rotor plane by (1 - a)
 # and increase the swirl by a factor of (1 + aPrime)
 def Inflowangle(radius, a, aPrime):
+    # TODO: Check this formula
     return np.arctan(freeStreamVelocity * (1 - a) / (rotationalSpeed * radius * (1 + aPrime))) # rad
 
 def AngleOfAttack(radius, a, aPrime):
@@ -123,35 +135,45 @@ def AngleOfAttack(radius, a, aPrime):
 def Solidity(radius):
     return bladeNumber * chordFunction(radius) / (2 * np.pi * radius)
 
+# Calculates the differential force coefficient at a given radius already projected in axial and tangential directions
+# Does not apply any corrections on its own
 def BEMElement(radius, a, aPrime)-> tuple:
     alpha = AngleOfAttack(radius, a, aPrime)
     cl, cd, _ = airfoil.lookupAll(alpha)
     inflowAngle = Inflowangle(radius, a, aPrime)
     
     # Axial and tangential forces per unit length
-    dCaxial = cl * np.cos(inflowAngle) + cd * max(np.sin(inflowAngle), EPSILON)
-    dCtangential = cl * max(np.sin(inflowAngle), EPSILON) - cd * np.cos(inflowAngle)
+    dCAxial = cl * np.cos(inflowAngle) + cd * max(np.sin(inflowAngle), EPSILON)
+    dCTangential = cl * max(np.sin(inflowAngle), EPSILON) - cd * np.cos(inflowAngle)
 
-    return dCaxial, dCtangential
-
-def GlauertCorrection(a):
-
-    return
-
-CT1 = 1.816
-CT2 = 2 * np.sqrt(CT1) - CT1 # NOTE: Does optimizer resolve this?
+    return dCAxial, dCTangential
 
 # We will want to solve for a and aPrime iteratively
+# Solves the induction factors at a given radius stage, applies Prandtl and Glauert corrections
+# Takes in settings for iterations and initial guesses
+# To do this the following algorithm is applied:
+# 	1) Takes an initial guess for induction factors from the previous solution (or default values if solution is not available)
+#	2) Enter Iterative Loop:
+#	3) Solve the bare BEM element thrust and tangential force coefficient
+#	4) Apply Prandtl tip loss correction ont the element
+#	5) For the given coefficients, use Rankine theory to find the induction
+#	6) Apply Glauert correction if applicable (if rotor is heavily loaded)
+#	7) Assign the momentum theory induction to aMomentum
+#	8) Correct the induction with the induction suggested by momentum theory with a given relaxation factor
+#	9) Repeat 3-8 until convergence is reached
+#	10) TODO: Write data to solution struct
 def SolveInduction(
         radius, 
         solutionProperties:SolutionProperties) -> tuple:
 
+	# Load iteration and convergence values from properties set for the solver
     maxIterations = solutionProperties.maxIterations
     tolerance = solutionProperties.tolerance
     relaxation = solutionProperties.relaxation
 
     # Initial guess
     if solutionProperties.elements.__len__() > 0:
+        # TODO: Do not use prev values if we didn't converge
         # We have a previous solution, use it as initial guess
         previousSolution = solutionProperties.elements[-1]
         a = previousSolution["a"]
@@ -171,8 +193,9 @@ def SolveInduction(
 
         # At tip, Prandtl correction will converge to 0 and we reach unity (DIV0)
         # HACK: We can assume minimal change and return values from previous solution
+        # TODO: Is this the problem? Maybe just return zeros?
         if prandtlCorrection < 1e-6:
-            solutionProperties.addSolution(radius, a, aPrime, iteration, 0.0)
+            solutionProperties.addSolutionIteration(radius, a, aPrime, iteration, 0.0)
             return a, aPrime
 
         inflowAngle = Inflowangle(radius, a, aPrime)
@@ -185,16 +208,21 @@ def SolveInduction(
         aPrimeMomentum = kappaPrime / (1 - kappaPrime)
 
         # Glauert correction
+        # TODO: Move this to a separate function
+        # Magic number correction thresholds from lecture slides
+        CT1 = 1.816
+        CT2 = 2 * np.sqrt(CT1) - CT1 # NOTE: Does optimizer resolve this?
+
         relativeVelocity = np.sqrt((freeStreamVelocity * (1 - a))**2 + (rotationalSpeed * radius * (1 + aPrime))**2)
         thrustCoefficient = solidity * dCax * (relativeVelocity / freeStreamVelocity)**2
-
+        
         if thrustCoefficient > CT2: # We need to apply Glauert correction
             aMomentum = 1 + (thrustCoefficient - CT1) / (4 * np.sqrt(CT1) - 4)
 
         # Check for convergence
         if np.abs(a - aMomentum) < tolerance and np.abs(aPrime - aPrimeMomentum) < tolerance:
             # We have converged
-            solutionProperties.addSolution(radius, aMomentum, aPrimeMomentum, iteration, max(np.abs(a - aMomentum), np.abs(aPrime - aPrimeMomentum)))
+            solutionProperties.addSolutionIteration(radius, aMomentum, aPrimeMomentum, iteration, max(np.abs(a - aMomentum), np.abs(aPrime - aPrimeMomentum)))
             return aMomentum, aPrimeMomentum
 
         # Assign new values with relaxation
@@ -204,6 +232,7 @@ def SolveInduction(
     print("No convergence reached after maximum iterations")
     return a, aPrime
 
+# Computes the corrected converged differential axial thrust and torque multiplied by the bladeNumber
 def solveElement(radius, solutionProperties:SolutionProperties=None):
     a, aPrime = SolveInduction(radius, solutionProperties=solutionProperties)
     dCax, dCtg = BEMElement(radius, a, aPrime)

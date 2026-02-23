@@ -9,15 +9,10 @@
 import numpy as np
 import pandas as pd
 
+EPSILON = 1e-6
+
 # We want a handy way to load airfoil data from a file (or keep local capabilityto define it in code)
 class Airfoil:
-    def __init__(self, alpha, cl, cd, cm):
-        self.alpha = alpha
-        self.cl = cl
-        self.cd = cd
-        self.cm = cm
-
-    # Overload the constructor to allow loading from a file
     def __init__(self, filename):
         self.data = pd.read_csv(filename)
         # Input in CSV is in degrees; convert once so internals use radians.
@@ -39,6 +34,42 @@ class Airfoil:
         
     def lookupAll(self, alpha) -> tuple:
         return self.lookup(alpha, 'cl'), self.lookup(alpha, 'cd'), self.lookup(alpha, 'cm')
+    
+class SolutionProperties:
+
+    # Store convergence history
+    def __init__(self):
+        self.elements = []
+        self.maxIterations = 100
+        self.tolerance = 1e-6
+        self.relaxation = 0.5
+        self.elementCount = 10
+
+        self.initialGuess = {
+            "a": 0.3,
+            "aPrime": 0.01}
+    
+    def setParameters(self, maxIterations, tolerance, relaxation, elementCount):
+        self.maxIterations = maxIterations
+        self.tolerance = tolerance
+        self.relaxation = relaxation
+        self.elementCount = elementCount
+
+    def addSolution(self, radius, a, aPrime, iterations, precision):
+        self.elements.append({
+            "radius": radius,
+            "a": a,
+            "aPrime": aPrime,
+            "iterations": iterations,
+            "precision": precision,
+            "converged": precision < self.tolerance
+        })
+
+    def getConvergence(self, radius):
+        for element in self.elements:
+            if element["radius"] == radius:
+                return element
+        return None # Not found
 
 #region Parameters
 # I do not like keeping magic numbers here but seems most convinient to keep away from main
@@ -53,7 +84,7 @@ dimensionlessRadialPosition = lambda radius: radius / tipRadius
 
 # Aerodynamic    
 freeStreamVelocity = 10.0 # m/s
-tipSpeedRatio = 6.0 # TODO include all three TSRs
+tipSpeedRatio = 8.0 # TODO include all three TSRs
 rotationalSpeed = tipSpeedRatio * freeStreamVelocity / tipRadius # rad/s
 # Fluid properties for air at sea level
 airDensity = 1.225 # kg/m^3
@@ -72,18 +103,22 @@ def PitchAngle(radius):
     return np.deg2rad(bladeTwist(radius) + bladePitch(radius)) # rad
 
 def PrandtlTipLoss(radius, a):
+    if radius == tipRadius:
+        return 0.0 # At the tip, the correction converges to zero
     d = ((2 * np.pi * radius) / bladeNumber) * (1 - a) / np.sqrt(tipSpeedRatio**2 + (1 - a)**2)
-    f = (2/np.pi) * np.arccos(np.exp(-np.pi * (1-radius/tipRadius) / d))
+    argument = np.exp(-np.pi * (1-radius/tipRadius) / d)
+    # Clamp argument to avoid numerical issues with arccos
+    argument = np.clip(argument, EPSILON, 1 - EPSILON)
+    f = (2/np.pi) * np.arccos(argument)
     return f
 
 # Induction will decrease the axial velocity at the rotor plane by (1 - a)
 # and increase the swirl by a factor of (1 + aPrime)
 def Inflowangle(radius, a, aPrime):
-    phi = np.arctan(freeStreamVelocity * (1 - a) / (rotationalSpeed(radius) * radius * (1 + aPrime)))
-    return phi # rad
+    return np.arctan(freeStreamVelocity * (1 - a) / (rotationalSpeed * radius * (1 + aPrime))) # rad
 
 def AngleOfAttack(radius, a, aPrime):
-    return PitchAngle(radius) - Inflowangle(radius, a, aPrime) # rad
+    return Inflowangle(radius, a, aPrime) - PitchAngle(radius) # rad
 
 def Solidity(radius):
     return bladeNumber * chordFunction(radius) / (2 * np.pi * radius)
@@ -94,8 +129,8 @@ def BEMElement(radius, a, aPrime)-> tuple:
     inflowAngle = Inflowangle(radius, a, aPrime)
     
     # Axial and tangential forces per unit length
-    dCaxial = cl * np.cos(inflowAngle) + cd * np.sin(inflowAngle)
-    dCtangential = cl * np.sin(inflowAngle) - cd * np.cos(inflowAngle)
+    dCaxial = cl * np.cos(inflowAngle) + cd * max(np.sin(inflowAngle), EPSILON)
+    dCtangential = cl * max(np.sin(inflowAngle), EPSILON) - cd * np.cos(inflowAngle)
 
     return dCaxial, dCtangential
 
@@ -107,10 +142,24 @@ CT1 = 1.816
 CT2 = 2 * np.sqrt(CT1) - CT1 # NOTE: Does optimizer resolve this?
 
 # We will want to solve for a and aPrime iteratively
-def SolveInduction(radius, maxIterations=100, tol=1e-6, relaxation=0.5):
+def SolveInduction(
+        radius, 
+        solutionProperties:SolutionProperties) -> tuple:
 
-    a = 0.3 # Initial guess for axial induction factor
-    aPrime = 0.01 # Initial guess for tangential induction factor
+    maxIterations = solutionProperties.maxIterations
+    tolerance = solutionProperties.tolerance
+    relaxation = solutionProperties.relaxation
+
+    # Initial guess
+    if solutionProperties.elements.__len__() > 0:
+        # We have a previous solution, use it as initial guess
+        previousSolution = solutionProperties.elements[-1]
+        a = previousSolution["a"]
+        aPrime = previousSolution["aPrime"]
+    else:
+        # This is the first solution, use default initial guess
+        a = solutionProperties.initialGuess["a"]
+        aPrime = solutionProperties.initialGuess["aPrime"]
 
     solidity = Solidity(radius)
 
@@ -118,38 +167,130 @@ def SolveInduction(radius, maxIterations=100, tol=1e-6, relaxation=0.5):
 
         # Find the forces on the blade element
         dCax, dCtg = BEMElement(radius, a, aPrime)
+        prandtlCorrection = PrandtlTipLoss(radius, a)
+
+        # At tip, Prandtl correction will converge to 0 and we reach unity (DIV0)
+        # HACK: We can assume minimal change and return values from previous solution
+        if prandtlCorrection < 1e-6:
+            solutionProperties.addSolution(radius, a, aPrime, iteration, 0.0)
+            return a, aPrime
+
+        inflowAngle = Inflowangle(radius, a, aPrime)
 
         # Correct induction factors
-        kappa = solidity * dCax / (4 * PrandtlTipLoss(radius, a) * np.sin(Inflowangle(radius, a, aPrime))**2)
+        kappa = solidity * dCax / (4 * prandtlCorrection * max(np.sin(inflowAngle), EPSILON)**2)
         aMomentum = kappa / (1 + kappa)
 
-        kappaPrime = solidity * dCtg / (4 * PrandtlTipLoss(radius, a) * np.sin(Inflowangle(radius, a, aPrime)) * np.cos(Inflowangle(radius, a, aPrime)))
+        kappaPrime = solidity * dCtg / (4 * prandtlCorrection * max(np.sin(inflowAngle), EPSILON) * np.cos(inflowAngle))
         aPrimeMomentum = kappaPrime / (1 - kappaPrime)
 
         # Glauert correction
-        relativeVelocity = np.sqrt((freeStreamVelocity * (1 - a))**2 + (rotationalSpeed(radius) * radius * (1 + aPrime))**2)
+        relativeVelocity = np.sqrt((freeStreamVelocity * (1 - a))**2 + (rotationalSpeed * radius * (1 + aPrime))**2)
         thrustCoefficient = solidity * dCax * (relativeVelocity / freeStreamVelocity)**2
 
-        if thrustCoefficient > CT2:
+        if thrustCoefficient > CT2: # We need to apply Glauert correction
             aMomentum = 1 + (thrustCoefficient - CT1) / (4 * np.sqrt(CT1) - 4)
 
         # Check for convergence
-        if np.abs(a - aMomentum) < tol and np.abs(aPrime - aPrimeMomentum) < tol:
-            break
+        if np.abs(a - aMomentum) < tolerance and np.abs(aPrime - aPrimeMomentum) < tolerance:
+            # We have converged
+            solutionProperties.addSolution(radius, aMomentum, aPrimeMomentum, iteration, max(np.abs(a - aMomentum), np.abs(aPrime - aPrimeMomentum)))
+            return aMomentum, aPrimeMomentum
 
         # Assign new values with relaxation
         a = relaxation * aMomentum + (1 - relaxation) * a
         aPrime = relaxation * aPrimeMomentum + (1 - relaxation) * aPrime
 
+    print("No convergence reached after maximum iterations")
     return a, aPrime
 
-def solveElement(radius):
-    a, aPrime = SolveInduction(radius)
+def solveElement(radius, solutionProperties:SolutionProperties=None):
+    a, aPrime = SolveInduction(radius, solutionProperties=solutionProperties)
     dCax, dCtg = BEMElement(radius, a, aPrime)
 
-    relativeVelocity = np.sqrt((freeStreamVelocity * (1 - a))**2 + (rotationalSpeed(radius) * radius * (1 + aPrime))**2)
+    relativeVelocity = np.sqrt((freeStreamVelocity * (1 - a))**2 + (rotationalSpeed * radius * (1 + aPrime))**2)
 
     dT = 0.5 * airDensity * relativeVelocity**2 * bladeNumber * chordFunction(radius) * dCax
     dQ = 0.5 * airDensity * relativeVelocity**2 * bladeNumber * chordFunction(radius) * radius * dCtg
 
     return dT, dQ
+
+if __name__ == "__main__":
+
+    solution = SolutionProperties()
+    solution.setParameters(
+        maxIterations=500, 
+        tolerance=1e-6, 
+        relaxation=0.5,
+        elementCount=100)
+    
+    radius = np.linspace(bladeStart * tipRadius, bladeEnd * tipRadius - 0.001 * tipRadius, num=solution.elementCount) # Avoid tip singularities
+
+    dT = np.array([])
+    dQ = np.array([])
+
+    thrust = 0.0
+    torque = 0.0
+    
+    for radiusIterator in radius:
+        print("-" * 20)
+        print(f"Solving for radius: {radiusIterator:.2f} m")
+
+        dTCurrent, dQCurrent = solveElement(radiusIterator, solutionProperties=solution)
+
+        dT = np.append(dT, dTCurrent)
+        dQ = np.append(dQ, dQCurrent)
+
+        thrust += dTCurrent * (radius[1] - radius[0]) # Integration
+        torque += dQCurrent * (radius[1] - radius[0]) # Integration
+
+        print(f"Solution converged: {solution.getConvergence(radiusIterator)['converged']}, iterations: {solution.getConvergence(radiusIterator)['iterations']}, precision: {solution.getConvergence(radiusIterator)['precision']}")
+        print(f"Differential thrust: {dTCurrent:.2f} N/m, Differential torque: {dQCurrent:.2f} Nm/m")
+
+    print("=" * 40)
+    print("Final results:")
+    print(f"Total thrust: {thrust:.2f} N, Total torque: {torque:.2f} Nm")
+
+    #region Plotting
+    import matplotlib.pyplot as plt
+
+    convergencePrecision = np.array([element["precision"] for element in solution.elements])
+    convergenceIterations = np.array([element["iterations"] for element in solution.elements])
+
+    fig, (ax_top, ax_bottom) = plt.subplots(
+        2, 1, figsize=(12, 9), sharex=True,
+        gridspec_kw={"height_ratios": [2, 1]}
+    )
+
+    # Top subplot: dT and dQ with secondary axis
+    ax_top_secondary = ax_top.twinx()
+    line_dT, = ax_top.plot(radius, dT, marker='o', color='tab:blue', label='dT')
+    line_dQ, = ax_top_secondary.plot(radius, dQ, marker='s', color='tab:orange', label='dQ')
+
+    ax_top.set_ylabel('Differential Thrust dT (N/m)', color='tab:blue')
+    ax_top_secondary.set_ylabel('Differential Torque dQ (Nm/m)', color='tab:orange')
+    ax_top.tick_params(axis='y', labelcolor='tab:blue')
+    ax_top_secondary.tick_params(axis='y', labelcolor='tab:orange')
+    ax_top.grid(True)
+    ax_top.legend([line_dT, line_dQ], ['dT', 'dQ'], loc='best')
+
+    # Bottom subplot: convergence precision and iterations
+    ax_bottom_secondary = ax_bottom.twinx()
+    line_precision, = ax_bottom.plot(
+        radius, convergencePrecision, marker='o', color='tab:green', label='Convergence precision'
+    )
+    line_iterations, = ax_bottom_secondary.plot(
+        radius, convergenceIterations, marker='^', color='tab:red', label='Iterations'
+    )
+
+    ax_bottom.set_xlabel('Radius (m)')
+    ax_bottom.set_ylabel('Convergence precision (-)', color='tab:green')
+    ax_bottom_secondary.set_ylabel('Iterations (-)', color='tab:red')
+    ax_bottom.tick_params(axis='y', labelcolor='tab:green')
+    ax_bottom_secondary.tick_params(axis='y', labelcolor='tab:red')
+    ax_bottom.grid(True)
+    ax_bottom.legend([line_precision, line_iterations], ['Convergence precision', 'Iterations'], loc='best')
+
+    plt.tight_layout()
+    plt.show()
+    #endregion

@@ -5,6 +5,8 @@
 #          - 
 #          - 
 #
+	#region Pitch Variations
+	
 # This code implements the Blade Element Momentum (BEM) method for calculating the aerodynamic performance of a wind turbine rotor.
 # including Glauert correction for high axial induction factors and Prandtl's tip loss correction.
 
@@ -103,14 +105,16 @@ airViscosity = 1.81e-5 # kg/m/s
 airfoil = Airfoil('AirfoilPolarPlot.csv')
 
 bladeTwist = lambda radius: 14.0 * (1 - dimensionlessRadialPosition(radius)) # deg
-bladePitch = lambda radius: -2.0 # deg
+bladePitch = -2.0 # deg
 chordFunction = lambda radius: 3.0 * (1 - dimensionlessRadialPosition(radius)) + 1.0 # m
 
 #endregion
 
-def PitchAngle(radius):
-	return np.deg2rad(bladeTwist(radius) + bladePitch(radius)) # rad
+def PitchAngle(radius, pitchOverrideDeg=None):
+	pitchDeg = bladePitch if pitchOverrideDeg is None else pitchOverrideDeg
+	return np.deg2rad(bladeTwist(radius) + pitchDeg) # rad
 
+# TODO: Apparently theres also a root loss
 def PrandtlTipLoss(radius, a):
 	if radius == tipRadius:
 		return 0.0 # At the tip, the correction converges to zero
@@ -129,16 +133,16 @@ def Inflowangle(radius, a, aPrime):
 	# TODO: Check this formula
 	return np.arctan(freeStreamVelocity * (1 - a) / (rotationalSpeed * radius * (1 + aPrime))) # rad
 
-def AngleOfAttack(radius, a, aPrime):
-	return Inflowangle(radius, a, aPrime) - PitchAngle(radius) # rad
+def AngleOfAttack(radius, a, aPrime, pitchOverrideDeg=None):
+	return Inflowangle(radius, a, aPrime) - PitchAngle(radius, pitchOverrideDeg=pitchOverrideDeg) # rad
 
 def Solidity(radius):
 	return bladeNumber * chordFunction(radius) / (2 * np.pi * radius)
 
 # Calculates the differential force coefficient at a given radius already projected in axial and tangential directions
 # Does not apply any corrections on its own
-def BEMElement(radius, a, aPrime)-> tuple:
-	alpha = AngleOfAttack(radius, a, aPrime)
+def BEMElement(radius, a, aPrime, pitchOverrideDeg=None)-> tuple:
+	alpha = AngleOfAttack(radius, a, aPrime, pitchOverrideDeg=pitchOverrideDeg)
 	cl, cd, _ = airfoil.lookupAll(alpha)
 	inflowAngle = Inflowangle(radius, a, aPrime)
 	
@@ -164,7 +168,8 @@ def BEMElement(radius, a, aPrime)-> tuple:
 #	10) TODO: Write data to solution struct
 def SolveInduction(
 		radius, 
-		solutionProperties:SolutionProperties) -> tuple:
+		solutionProperties:SolutionProperties,
+		pitchOverrideDeg=None) -> tuple:
 
 	# Load iteration and convergence values from properties set for the solver
 	maxIterations = solutionProperties.maxIterations
@@ -188,7 +193,7 @@ def SolveInduction(
 	for iteration in range(maxIterations):
 
 		# Find the forces on the blade element
-		dCax, dCtg = BEMElement(radius, a, aPrime)
+		dCax, dCtg = BEMElement(radius, a, aPrime, pitchOverrideDeg=pitchOverrideDeg)
 		prandtlCorrection = PrandtlTipLoss(radius, a)
 
 		# At tip, Prandtl correction will converge to 0 and we reach unity (DIV0)
@@ -209,6 +214,7 @@ def SolveInduction(
 
 		# Glauert correction
 		# TODO: Move this to a separate function
+		# TODO: Compare to the solution in the slides
 		# Magic number correction thresholds from lecture slides
 		CT1 = 1.816
 		CT2 = 2 * np.sqrt(CT1) - CT1 # NOTE: Does optimizer resolve this?
@@ -229,13 +235,13 @@ def SolveInduction(
 		a = relaxation * aMomentum + (1 - relaxation) * a
 		aPrime = relaxation * aPrimeMomentum + (1 - relaxation) * aPrime
 
-	print("No convergence reached after maximum iterations")
+	print("No convergence reached after maximum iterations") # TODO: Debug when this is called and find the problem
 	return a, aPrime
 
 # Computes the corrected converged differential axial thrust and torque multiplied by the bladeNumber
-def solveElement(radius, solutionProperties:SolutionProperties=None):
-	a, aPrime = SolveInduction(radius, solutionProperties=solutionProperties)
-	dCax, dCtg = BEMElement(radius, a, aPrime)
+def solveElement(radius, solutionProperties:SolutionProperties=None, pitchOverrideDeg=None):
+	a, aPrime = SolveInduction(radius, solutionProperties=solutionProperties, pitchOverrideDeg=pitchOverrideDeg)
+	dCax, dCtg = BEMElement(radius, a, aPrime, pitchOverrideDeg=pitchOverrideDeg)
 
 	relativeVelocity = np.sqrt((freeStreamVelocity * (1 - a))**2 + (rotationalSpeed * radius * (1 + aPrime))**2)
 
@@ -290,7 +296,6 @@ if __name__ == "__main__":
 		2, 1, figsize=(12, 9), sharex=True,
 		gridspec_kw={"height_ratios": [2, 1]}
 	)
-
 	# Top subplot: dT and dQ with secondary axis
 	ax_top_secondary = ax_top.twinx()
 	line_dT, = ax_top.plot(radius, dT, marker='o', color='tab:blue', label='dT')
@@ -319,6 +324,68 @@ if __name__ == "__main__":
 	ax_bottom_secondary.tick_params(axis='y', labelcolor='tab:red')
 	ax_bottom.grid(True)
 	ax_bottom.legend([line_precision, line_iterations], ['Convergence precision', 'Iterations'], loc='best')
+
+	plt.tight_layout()
+	plt.show()
+	#endregion
+
+	#region Pitch Variations
+	# Pitch as a function of radius
+	pitchByRadius = lambda radiusValue: -2.0 + 4.0 * (1 - dimensionlessRadialPosition(radiusValue)) # deg
+	radiusSweep = np.linspace(bladeStart * tipRadius, bladeEnd * tipRadius - 0.001 * tipRadius, num=80)
+
+	# Discretized map where each cell is one (radius, pitch) region
+	pitchMinDeg = -8.0
+	pitchMaxDeg = 6.0
+	pitchBins = 50
+	radiusBins = 80
+
+	pitchGrid = np.linspace(pitchMinDeg, pitchMaxDeg, num=pitchBins)
+	radiusGrid = np.linspace(bladeStart * tipRadius, bladeEnd * tipRadius - 0.001 * tipRadius, num=radiusBins)
+
+	dTMap = np.zeros((pitchBins, radiusBins))
+	dQMap = np.zeros((pitchBins, radiusBins))
+
+	for pitchIndex, pitchValue in enumerate(pitchGrid):
+		for radiusIndex, radiusValue in enumerate(radiusGrid):
+			bladePitch = pitchValue # Override the blade pitch for this solution
+			localSolution = SolutionProperties()
+			localSolution.setParameters(
+				maxIterations=250,
+				tolerance=1e-6,
+				relaxation=0.5,
+				elementCount=1
+			)
+
+			dTValue, dQValue = solveElement(radiusValue, solutionProperties=localSolution, pitchOverrideDeg=pitchValue)
+			dTMap[pitchIndex, radiusIndex] = dTValue
+			dQMap[pitchIndex, radiusIndex] = dQValue
+
+	# Combined normalized score from thrust and torque contributions
+	dTMin, dTMax = np.min(dTMap), np.max(dTMap)
+	dQMin, dQMax = np.min(dQMap), np.max(dQMap)
+	dTNorm = (dTMap - dTMin) / max(dTMax - dTMin, EPSILON)
+	dQNorm = (dQMap - dQMin) / max(dQMax - dQMin, EPSILON)
+	# performanceMap = 0.5 * (dTNorm + dQNorm)
+	performanceMap = dTNorm
+
+	fig_pitch= plt.figure(figsize=(10, 6))
+
+	# Color-square style discretized performance map
+	ax_pitch_map = fig_pitch.add_subplot(111)
+	heatmap = ax_pitch_map.pcolormesh(
+		radiusGrid,
+		pitchGrid,
+		performanceMap,
+		shading='auto',
+		cmap='viridis'
+	)
+	ax_pitch_map.set_xlabel('Radius (m)')
+	ax_pitch_map.set_ylabel('Pitch (deg)')
+	ax_pitch_map.set_title('Element Performance Map (Combined Normalized dT and dQ)')
+	ax_pitch_map.grid(False)
+	colorbar = fig_pitch.colorbar(heatmap, ax=ax_pitch_map)
+	colorbar.set_label('Performance score (-)')
 
 	plt.tight_layout()
 	plt.show()

@@ -62,14 +62,15 @@ class SolutionProperties:
 		self.relaxation = relaxation
 		self.elementCount = elementCount
 
-	def addSolutionIteration(self, radius, a, aPrime, iterations, precision):
+	def addSolutionIteration(self, radius, a, aPrime, iterations, precision, pradtlCorrection):
 		self.elements.append({
 			"radius": radius,
 			"a": a,
 			"aPrime": aPrime,
 			"iterations": iterations,
 			"precision": precision,
-			"converged": precision < self.tolerance
+			"converged": precision < self.tolerance,
+			"prandtlCorrection": pradtlCorrection
 		})
 
 	# TODO: We want to keep all of the solution variables in one struct to then have easy access to solutions of all TSRs, to do this we should:
@@ -117,14 +118,31 @@ def PitchAngle(radius, pitchOverrideDeg=None):
 # TODO: Apparently theres also a root loss
 def PrandtlTipLoss(radius, a):
 	if radius == tipRadius:
-		return 0.0 # At the tip, the correction converges to zero
+		return 0.0 # At the tip, use the full correction value (not zero)
 	
-	d = ((2 * np.pi * radius) / bladeNumber) * (1 - a) / np.sqrt(tipSpeedRatio**2 + (1 - a)**2)
-	argument = np.exp(-np.pi * (1-radius/tipRadius) / d)
-	# HACK: Clamp argument to avoid numerical issues with arccos
-	# We might be hitting some unities here around the tip
-	argument = np.clip(argument, EPSILON, 1 - EPSILON)
-	f = (2/np.pi) * np.arccos(argument)
+	# r_R is the non-dimensioned radius position
+	r_R = dimensionlessRadialPosition(radius)
+	
+	# Tip loss factor calculation
+	# Use (1-a)**2 as denominator, but guard against division by zero
+	denominator = (1 - a)**2
+	if denominator < 1e-6:
+		denominator = 1e-6
+	
+	argument_tip = -bladeNumber/2 * (1 - r_R) / r_R * np.sqrt(1 + (tipSpeedRatio * r_R)**2 / denominator)
+	argument_tip = np.clip(argument_tip, -700, 0)
+	exp_tip = np.clip(np.exp(argument_tip), -1, 1)
+	fTip = 2/np.pi * np.arccos(exp_tip)
+	
+	# Root loss factor calculation
+	argument_root = -bladeNumber/2 * (r_R - dimensionlessRadialPosition(bladeStart * tipRadius)) / (1 - dimensionlessRadialPosition(bladeStart * tipRadius)) * np.sqrt(1 + (tipSpeedRatio * r_R)**2 / denominator)
+	argument_root = np.clip(argument_root, -700, 0)
+	exp_root = np.clip(np.exp(argument_root), -1, 1)
+	fRoot = 2/np.pi * np.arccos(exp_root)
+
+	# Combined loss factor
+	f = fTip * fRoot
+
 	return f
 
 # Induction will decrease the axial velocity at the rotor plane by (1 - a)
@@ -147,8 +165,8 @@ def BEMElement(radius, a, aPrime, pitchOverrideDeg=None)-> tuple:
 	inflowAngle = Inflowangle(radius, a, aPrime)
 	
 	# Axial and tangential forces per unit length
-	dCAxial = cl * np.cos(inflowAngle) + cd * max(np.sin(inflowAngle), EPSILON)
-	dCTangential = cl * max(np.sin(inflowAngle), EPSILON) - cd * np.cos(inflowAngle)
+	dCAxial = cl * np.cos(inflowAngle) + cd * np.maximum(np.sin(inflowAngle), EPSILON)
+	dCTangential = cl * np.maximum(np.sin(inflowAngle), EPSILON) - cd * np.cos(inflowAngle)
 
 	return dCAxial, dCTangential
 
@@ -200,16 +218,18 @@ def SolveInduction(
 		# HACK: We can assume minimal change and return values from previous solution
 		# TODO: Is this the problem? Maybe just return zeros?
 		if prandtlCorrection < 1e-6:
-			solutionProperties.addSolutionIteration(radius, a, aPrime, iteration, 0.0)
+			solutionProperties.addSolutionIteration(radius, a, aPrime, iteration, 0.0, prandtlCorrection)
 			return a, aPrime
 
 		inflowAngle = Inflowangle(radius, a, aPrime)
 
 		# Correct induction factors
-		kappa = solidity * dCax / (4 * prandtlCorrection * max(np.sin(inflowAngle), EPSILON)**2)
+		sinInflow = np.maximum(np.sin(inflowAngle), EPSILON)
+		cosInflow = np.cos(inflowAngle)
+		kappa = solidity * dCax / (4 * prandtlCorrection * sinInflow**2)
 		aMomentum = kappa / (1 + kappa)
 
-		kappaPrime = solidity * dCtg / (4 * prandtlCorrection * max(np.sin(inflowAngle), EPSILON) * np.cos(inflowAngle))
+		kappaPrime = solidity * dCtg / (4 * prandtlCorrection * sinInflow * cosInflow)
 		aPrimeMomentum = kappaPrime / (1 - kappaPrime)
 
 		# Glauert correction
@@ -228,7 +248,15 @@ def SolveInduction(
 		# Check for convergence
 		if np.abs(a - aMomentum) < tolerance and np.abs(aPrime - aPrimeMomentum) < tolerance:
 			# We have converged
-			solutionProperties.addSolutionIteration(radius, aMomentum, aPrimeMomentum, iteration, max(np.abs(a - aMomentum), np.abs(aPrime - aPrimeMomentum)))
+			solutionProperties.addSolutionIteration(
+				radius, 
+				aMomentum, 
+				aPrimeMomentum, 
+				iteration, 
+				max(np.abs(a - aMomentum), 
+				np.abs(aPrime - aPrimeMomentum)), 
+				prandtlCorrection)
+			
 			return aMomentum, aPrimeMomentum
 
 		# Assign new values with relaxation
@@ -279,15 +307,26 @@ if __name__ == "__main__":
 		thrust += dTCurrent * (radius[1] - radius[0]) # Integration
 		torque += dQCurrent * (radius[1] - radius[0]) # Integration
 
-		print(f"Solution converged: {solution.getConvergence(radiusIterator)['converged']}, iterations: {solution.getConvergence(radiusIterator)['iterations']}, precision: {solution.getConvergence(radiusIterator)['precision']}")
+		convergenceData = solution.getConvergence(radiusIterator)
+		if convergenceData:
+			print(f"Solution converged: {convergenceData['converged']}, iterations: {convergenceData['iterations']}, precision: {convergenceData['precision']}")
+		else:
+			print(f"No convergence data found for radius: {radiusIterator:.2f} m")
 		print(f"Differential thrust: {dTCurrent:.2f} N/m, Differential torque: {dQCurrent:.2f} Nm/m")
 
 	print("=" * 40)
 	print("Final results:")
 	print(f"Total thrust: {thrust:.2f} N, Total torque: {torque:.2f} Nm")
+	
+	# Calculate coefficient of power
+	rotorArea = np.pi * tipRadius**2
+	power = torque * rotationalSpeed  # Power = Torque * angular velocity
+	windPower = 0.5 * airDensity * rotorArea * freeStreamVelocity**3  # Available wind power
+	cP = power / windPower if windPower > 0 else 0
+	print(f"Total power: {power:.2f} W, Coefficient of power cP: {cP:.4f}")
 
-	#region Plotting
 	import matplotlib.pyplot as plt
+	#region Plotting
 
 	convergencePrecision = np.array([element["precision"] for element in solution.elements])
 	convergenceIterations = np.array([element["iterations"] for element in solution.elements])
@@ -326,6 +365,32 @@ if __name__ == "__main__":
 	ax_bottom.legend([line_precision, line_iterations], ['Convergence precision', 'Iterations'], loc='best')
 
 	plt.tight_layout()
+
+	fig2 = plt.figure(figsize=(10, 6))
+	fig2_ax = fig2.add_subplot(111)
+
+	prandtlCorrection = np.array([element['prandtlCorrection'] for element in solution.elements])
+	axialInduction = np.array([element['a'] for element in solution.elements])
+	
+	# Plot Prandtl correction
+	ax2_main = fig2_ax
+	ax2_main.plot(radius, prandtlCorrection, marker='o', color='tab:purple', label='Prandtl correction', linewidth=2)
+	ax2_main.set_xlabel('Radius (m)')
+	ax2_main.set_ylabel('Prandtl Tip Loss Correction (-)', color='tab:purple')
+	ax2_main.tick_params(axis='y', labelcolor='tab:purple')
+	ax2_main.grid(True)
+	
+	# Plot axial induction on secondary axis
+	ax2_secondary = ax2_main.twinx()
+	ax2_secondary.plot(radius, axialInduction, marker='s', color='tab:cyan', label='Axial induction a', linewidth=2)	
+	ax2_secondary.set_ylabel('Axial induction a (-)', color='tab:cyan')
+	ax2_secondary.tick_params(axis='y', labelcolor='tab:cyan')
+	
+	ax2_main.set_title('Prandtl Tip Loss Correction vs Radius')
+	ax2_main.legend(loc='upper left')
+	ax2_secondary.legend(loc='upper right')
+	plt.grid(True)
+
 	plt.show()
 	#endregion
 
@@ -335,8 +400,8 @@ if __name__ == "__main__":
 	radiusSweep = np.linspace(bladeStart * tipRadius, bladeEnd * tipRadius - 0.001 * tipRadius, num=80)
 
 	# Discretized map where each cell is one (radius, pitch) region
-	pitchMinDeg = -8.0
-	pitchMaxDeg = 6.0
+	pitchMinDeg = -10.0
+	pitchMaxDeg = 10.0
 	pitchBins = 50
 	radiusBins = 80
 
@@ -345,14 +410,15 @@ if __name__ == "__main__":
 
 	dTMap = np.zeros((pitchBins, radiusBins))
 	dQMap = np.zeros((pitchBins, radiusBins))
+	cPMap = np.zeros((pitchBins, radiusBins))
 
 	for pitchIndex, pitchValue in enumerate(pitchGrid):
 		for radiusIndex, radiusValue in enumerate(radiusGrid):
 			bladePitch = pitchValue # Override the blade pitch for this solution
 			localSolution = SolutionProperties()
 			localSolution.setParameters(
-				maxIterations=250,
-				tolerance=1e-6,
+				maxIterations=1000,
+				tolerance=1e-4,
 				relaxation=0.5,
 				elementCount=1
 			)
@@ -360,32 +426,39 @@ if __name__ == "__main__":
 			dTValue, dQValue = solveElement(radiusValue, solutionProperties=localSolution, pitchOverrideDeg=pitchValue)
 			dTMap[pitchIndex, radiusIndex] = dTValue
 			dQMap[pitchIndex, radiusIndex] = dQValue
+			
+			# Calculate local cP
+			localPower = dQValue * rotationalSpeed
+			localRotorArea = np.pi * tipRadius**2
+			localWindPower = 0.5 * airDensity * localRotorArea * freeStreamVelocity**3
+			cPMap[pitchIndex, radiusIndex] = localPower / localWindPower if localWindPower > 0 else 0
 
-	# Combined normalized score from thrust and torque contributions
-	dTMin, dTMax = np.min(dTMap), np.max(dTMap)
-	dQMin, dQMax = np.min(dQMap), np.max(dQMap)
-	dTNorm = (dTMap - dTMin) / max(dTMax - dTMin, EPSILON)
-	dQNorm = (dQMap - dQMin) / max(dQMax - dQMin, EPSILON)
-	# performanceMap = 0.5 * (dTNorm + dQNorm)
-	performanceMap = dTNorm
+	# Coefficient of power map
+	fig_pitch = plt.figure(figsize=(12, 8))
+	
+	targetVariavle = cPMap
 
-	fig_pitch= plt.figure(figsize=(10, 6))
-
-	# Color-square style discretized performance map
-	ax_pitch_map = fig_pitch.add_subplot(111)
-	heatmap = ax_pitch_map.pcolormesh(
+	# cP performance map
+	ax_cP = fig_pitch.add_subplot(111)
+	heatmap_cP = ax_cP.pcolormesh(
 		radiusGrid,
 		pitchGrid,
-		performanceMap,
+		targetVariavle,
 		shading='auto',
 		cmap='viridis'
 	)
-	ax_pitch_map.set_xlabel('Radius (m)')
-	ax_pitch_map.set_ylabel('Pitch (deg)')
-	ax_pitch_map.set_title('Element Performance Map (Combined Normalized dT and dQ)')
-	ax_pitch_map.grid(False)
-	colorbar = fig_pitch.colorbar(heatmap, ax=ax_pitch_map)
-	colorbar.set_label('Performance score (-)')
+	ax_cP.set_xlabel('Radius (m)')
+	ax_cP.set_ylabel('Pitch (deg)')
+	ax_cP.set_title('Coefficient of Power (cP) Performance Map')
+	ax_cP.grid(False)
+	colorbar_cP = fig_pitch.colorbar(heatmap_cP, ax=ax_cP)
+	colorbar_cP.set_label('cP (-)')
+	
+	# Add markers for maximum cP value in each column (each radius)
+	max_indices = np.argmax(targetVariavle, axis=0)  # Find max pitch index for each radius
+	max_pitches = pitchGrid[max_indices]  # Get the pitch values at those indices
+	ax_cP.plot(radiusGrid, max_pitches, 'r*', markersize=15, label='Maximum cP per radius')
+	ax_cP.legend(loc='best')
 
 	plt.tight_layout()
 	plt.show()

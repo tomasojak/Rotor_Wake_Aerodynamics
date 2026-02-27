@@ -330,7 +330,7 @@ if __name__ == "__main__":
 
 	###### PART 1: SOLVE BEM AND PLOT RESULTS ######
 
-	for tsr in [8.0, 10.0, 12.0]:
+	for tsr in [8.0]:
 		solution1 = st.SolverData()
 		solution1.setParameters(
 			maxIterations=500, 
@@ -344,8 +344,6 @@ if __name__ == "__main__":
 
 		# Plot main BEM results
 		plot_bem_results(solution1.result.radius, solution1.result.dT, solution1.result.dQ, solution1.elementSolutions)
-
-	ShowPlots()
 
 	# Pitch as a function of radius
 	localSolution = st.SolverData()
@@ -392,3 +390,5 @@ if __name__ == "__main__":
 			cPMap[pitchIndex, radiusIndex] = localPower / localWindPower if localWindPower > 0 else 0
 
 	plot_pitch_variations(radiusGrid, pitchGrid, cPMap)
+
+	ShowPlots()

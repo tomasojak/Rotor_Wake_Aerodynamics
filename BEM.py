@@ -379,6 +379,11 @@ if __name__ == "__main__":
 			# Override the blade pitch for this solution
 			localSolution.geometry.bladePitch = pitchValue
 
+			# NOTE: Pitch angle should be constant along the blade???
+			# NOTE: There is an optimal inflow angle for maximum power, see cp of the airfoil
+			#	Maybe we just need to enforce the optimal angle of attack for all radii to get best performance?
+			# 	Could be compared to this approach I guess 
+
 			dTValue, dQValue = solveElement(radiusValue, localSolution)
 			dTMap[pitchIndex, radiusIndex] = dTValue
 			dQMap[pitchIndex, radiusIndex] = dQValue

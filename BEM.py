@@ -11,7 +11,7 @@
 
 import numpy as np
 import SolverTools as st
-from Plotting import *
+import Plotting as BEMPlotting
 
 EPSILON = 1e-6
 DEBUG_PRINT = False
@@ -242,7 +242,8 @@ def SolveInduction(
 		a = relaxation * aMomentum + (1 - relaxation) * a
 		aPrime = relaxation * aPrimeMomentum + (1 - relaxation) * aPrime
 
-	if DEBUG_PRINT: print("No convergence reached after maximum iterations")
+	if DEBUG_PRINT: 
+		print("No convergence reached after maximum iterations")
 	return a, aPrime
 
 # Computes the corrected converged differential axial thrust and torque multiplied by the bladeNumber
@@ -292,8 +293,10 @@ def SolveBEM(solutionProperties:st.SolverData):
 	torque = 0.0
 	
 	for radiusIterator in radius:
-		if DEBUG_PRINT: print("-" * 20)
-		if DEBUG_PRINT: print(f"Solving for radius: {radiusIterator:.2f} m")
+		if DEBUG_PRINT: 
+			print("-" * 20)
+		if DEBUG_PRINT: 
+			print(f"Solving for radius: {radiusIterator:.2f} m")
 
 		dTCurrent, dQCurrent = solveElement(radiusIterator, solutionProperties)
 
@@ -305,10 +308,13 @@ def SolveBEM(solutionProperties:st.SolverData):
 
 		convergenceData = solutionProperties.getElementSolution(radiusIterator)
 		if convergenceData:
-			if DEBUG_PRINT: print(f"Solution converged: {convergenceData.converged}, iterations: {convergenceData.iterations}, precision: {convergenceData.precision}")
+			if DEBUG_PRINT: 
+				print(f"Solution converged: {convergenceData.converged}, iterations: {convergenceData.iterations}, precision: {convergenceData.precision}")
 		else:
-			if DEBUG_PRINT: print(f"No convergence data found for radius: {radiusIterator:.2f} m")
-		if DEBUG_PRINT: print(f"Differential thrust: {dTCurrent:.2f} N/m, Differential torque: {dQCurrent:.2f} Nm/m")
+			if DEBUG_PRINT: 
+				print(f"No convergence data found for radius: {radiusIterator:.2f} m")
+		if DEBUG_PRINT: 
+			print(f"Differential thrust: {dTCurrent:.2f} N/m, Differential torque: {dQCurrent:.2f} Nm/m")
 
 
 	print("=" * 40)
@@ -343,7 +349,7 @@ if __name__ == "__main__":
 		SolveBEM(solution1)
 
 		# Plot main BEM results
-		plot_bem_results(solution1.result.radius, solution1.result.dT, solution1.result.dQ, solution1.elementSolutions)
+		BEMPlotting.plot_bem_results(solution1.result.radius, solution1.result.dT, solution1.result.dQ, solution1.elementSolutions)
 
 	# Pitch as a function of radius
 	localSolution = st.SolverData()
@@ -356,7 +362,9 @@ if __name__ == "__main__":
 
 	geometry = localSolution.geometry
 
-	pitchByRadius = lambda radiusValue: -2.0 + 4.0 * (1 - geometry.dimensionlessRadialPosition(radiusValue)) # deg
+	def pitchByRadius(radiusValue):
+		return -2.0 + 4.0 * (1 - geometry.dimensionlessRadialPosition(radiusValue)) # deg
+	
 	radiusSweep = np.linspace(geometry.bladeStart * geometry.tipRadius, geometry.bladeEnd * geometry.tipRadius - 0.001 * geometry.tipRadius, num=80)
 
 	# Discretized map where each cell is one (radius, pitch) region
@@ -394,6 +402,6 @@ if __name__ == "__main__":
 			localWindPower = 0.5 * localSolution.airDensity * localRotorArea * localSolution.geometry.freeStreamVelocity**3
 			cPMap[pitchIndex, radiusIndex] = localPower / localWindPower if localWindPower > 0 else 0
 
-	plot_pitch_variations(radiusGrid, pitchGrid, cPMap)
+	BEMPlotting.plot_pitch_variations(radiusGrid, pitchGrid, cPMap)
 
-	ShowPlots()
+	BEMPlotting.ShowPlots()

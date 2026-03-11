@@ -137,7 +137,6 @@ class SolverData:
 		self.airViscosity = 1.81e-5 # kg/m/s
 
 		self.elementSolutions: list[IterationSolution] = []
-		# NOTE: Maybe this should be kept separately from the solution
 		self.maxIterations = 100
 		self.tolerance = 1e-6
 		self.relaxation = 0.5
@@ -188,3 +187,19 @@ class SolverData:
 			if element.radius == radius:
 				return element
 		return None # Not found
+	
+	def getConvergencePrecision(self):
+		"""
+		Get the infinite norm of the convergence precision across all elements
+		"""
+		if not self.elementSolutions:
+			return None
+		return max(element.precision for element in self.elementSolutions)
+
+	def getIterationsCount(self):
+		"""
+		Get the maximum iteration count across all elements
+		"""
+		if not self.elementSolutions:
+			return None
+		return max(element.iterations for element in self.elementSolutions)

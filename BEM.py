@@ -21,16 +21,16 @@ def PitchAngle(radius, solverProperties:st.SolverData):
 	bladePitchDeg = np.deg2rad(solverProperties.geometry.bladePitch)
 	return bladeTwist + bladePitchDeg # rad
 
-def PrandtlCorrection(radius, a, solverProperties:st.SolverData):
+def PrandtlCorrection(radius, inflowAngle, solverProperties:st.SolverData):
 	"""
-	Calculate Prandtl's tip and root loss correction factor.
+		Calculate Prandtl's tip and root loss correction factor.
 	
 	This accounts for the finite number of blades and the flow around the blade tips
 	and roots, which reduces the effective forces compared to an infinite number of blades.
 	
 	Args:
 		radius: Radial position along the blade (m)
-		a: Axial induction factor
+		inflowAngle: Local inflow angle (rad)
 		solverProperties: SolverData instance containing geometry and solver settings
 		
 	Returns:
@@ -38,27 +38,25 @@ def PrandtlCorrection(radius, a, solverProperties:st.SolverData):
 	"""
 	geometry = solverProperties.geometry
 
-	if radius == geometry.tipRadius:
-		return 0.0 # At the tip, use the full correction value (not zero)
+	if radius >= geometry.tipRadius:
+		return 0.0
 	
 	# r_R is the non-dimensioned radius position
 	r_R = geometry.dimensionlessRadialPosition(radius)
 	
-	# Tip loss factor calculation
-	# Use (1-a)**2 as denominator, but guard against division by zero
-	denominator = (1 - a)**2
-	if denominator < 1e-6:
-		denominator = 1e-6
-	
-	argument_tip = -geometry.bladeNumber/2 * (1 - r_R) / r_R * np.sqrt(1 + (geometry.tipSpeedRatio * r_R)**2 / denominator)
+	# Standard Prandtl model uses |sin(phi)| in the denominator.
+	sin_phi = max(np.abs(np.sin(inflowAngle)), EPSILON)
+
+	argument_tip = -geometry.bladeNumber / 2 * (1 - r_R) / (r_R * sin_phi)
 	argument_tip = np.clip(argument_tip, -700, 0)
-	exp_tip = np.clip(np.exp(argument_tip), -1, 1)
+	exp_tip = np.clip(np.exp(argument_tip), 0, 1)
 	fTip = 2/np.pi * np.arccos(exp_tip)
 	
 	# Root loss factor calculation
-	argument_root = -geometry.bladeNumber/2 * (r_R - geometry.dimensionlessRadialPosition(geometry.bladeStart * geometry.tipRadius)) / (1 - geometry.dimensionlessRadialPosition(geometry.bladeStart * geometry.tipRadius)) * np.sqrt(1 + (geometry.tipSpeedRatio * r_R)**2 / denominator)
+	r_hub = geometry.dimensionlessRadialPosition(geometry.bladeStart * geometry.tipRadius)
+	argument_root = -geometry.bladeNumber / 2 * (r_R - r_hub) / (r_hub * sin_phi)
 	argument_root = np.clip(argument_root, -700, 0)
-	exp_root = np.clip(np.exp(argument_root), -1, 1)
+	exp_root = np.clip(np.exp(argument_root), 0, 1)
 	fRoot = 2/np.pi * np.arccos(exp_root)
 
 	# Combined loss factor
@@ -66,7 +64,7 @@ def PrandtlCorrection(radius, a, solverProperties:st.SolverData):
 
 	return f
 
-def GlauertCorrection(aMomentum, radius, induction, inductionPrime, solidity, dCax, solverProperties:st.SolverData):
+def GlauertCorrection(aMomentum, radius, induction, inductionPrime, solidity, dCax, prandtlCorrection, solverProperties:st.SolverData):
 	"""
 	Apply Glauert's empirical correction for high axial induction factors.
 	
@@ -80,6 +78,7 @@ def GlauertCorrection(aMomentum, radius, induction, inductionPrime, solidity, dC
 		inductionPrime: Current tangential induction factor
 		solidity: Local solidity
 		dCax: Differential axial force coefficient
+		prandtlCorrection: Prandtl tip/root loss factor (F)
 		solverProperties: SolverData instance containing geometry and solver settings
 		
 	Returns:
@@ -91,19 +90,21 @@ def GlauertCorrection(aMomentum, radius, induction, inductionPrime, solidity, dC
 	CT2 = 2 * np.sqrt(CT1) - CT1
 
 	relativeVelocity = np.sqrt((geometry.freeStreamVelocity * (1 - induction))**2 + (geometry.rotationalSpeed * radius * (1 + inductionPrime))**2)
-	thrustCoefficient = solidity * dCax * (relativeVelocity / geometry.freeStreamVelocity)**2
+	# Prandtl factor scales effective disk loading — must be included for consistency
+	# with the momentum equations and to prevent tip-region divergence
+	thrustCoefficient = prandtlCorrection * solidity * dCax * (relativeVelocity / geometry.freeStreamVelocity)**2
 	
 	if thrustCoefficient > CT2: # We need to apply Glauert correction
 		aMomentum = 1 + (thrustCoefficient - CT1) / (4 * np.sqrt(CT1) - 4)
 	return aMomentum
 	
-def Inflowangle(radius, a, aPrime, solverProperties:st.SolverData):
+def InflowAngle(radius, a, aPrime, solverProperties:st.SolverData):
 	freeStreamVelocity = solverProperties.geometry.freeStreamVelocity
 	rotationalSpeed = solverProperties.geometry.rotationalSpeed
 	return np.arctan(freeStreamVelocity * (1 - a) / (rotationalSpeed * radius * (1 + aPrime))) # rad
 
 def AngleOfAttack(radius, a, aPrime, solverProperties:st.SolverData):
-	return Inflowangle(radius, a, aPrime, solverProperties) - PitchAngle(radius, solverProperties) # rad
+	return InflowAngle(radius, a, aPrime, solverProperties) - PitchAngle(radius, solverProperties) # rad
 
 def Solidity(radius, solverProperties:st.SolverData):
 	bladeNumber = solverProperties.geometry.bladeNumber
@@ -128,7 +129,7 @@ def BEMElement(radius, a, aPrime, solverProperties:st.SolverData)-> tuple:
 	"""
 	alpha = AngleOfAttack(radius, a, aPrime, solverProperties)
 	cl, cd, _ = solverProperties.geometry.airfoil.lookupAll(alpha)
-	inflowAngle = Inflowangle(radius, a, aPrime, solverProperties)
+	inflowAngle = InflowAngle(radius, a, aPrime, solverProperties)
 	
 	# Axial and tangential forces per unit length
 	dCAxial = cl * np.cos(inflowAngle) + cd * np.maximum(np.sin(inflowAngle), EPSILON)
@@ -199,40 +200,37 @@ def SolveInduction(
 		dCt, dCn = BEMElement(radius, a, aPrime, solutionProperties)
 		dCq = dCn * radius
 
-		prandtlCorrection = PrandtlCorrection(radius, a, solutionProperties)
-
-		inflowAngle = Inflowangle(radius, a, aPrime, solutionProperties)
+		inflowAngle = InflowAngle(radius, a, aPrime, solutionProperties)
 		angleOfAttack = AngleOfAttack(radius, a, aPrime, solutionProperties)
+		prandtlCorrection = PrandtlCorrection(radius, inflowAngle, solutionProperties)
 		
-		# At tip, Prandtl correction will converge to 0 and we reach unity (DIV0)
-		# HACK: We can assume minimal change and return values from previous solution
-		if prandtlCorrection < 1e-6:
-			solutionProperties.addSolutionIteration(st.IterationSolution(
-				radius,
-				a, 
-				aPrime,
-				iteration, 
-				0.0, 
-				prandtlCorrection,
-				angleOfAttack,
-				inflowAngle,
-				dCt, 
-				dCn, 
-				dCq))
-			return a, aPrime
-
-
 		# Correct induction factors
 		sinInflow = np.maximum(np.sin(inflowAngle), EPSILON)
-		cosInflow = np.cos(inflowAngle)
-		kappa = solidity * dCt / (4 * prandtlCorrection * sinInflow**2)
-		aMomentum = kappa / (1 + kappa)
+		cosInflow = np.maximum(np.abs(np.cos(inflowAngle)), EPSILON)
 
-		kappaPrime = solidity * dCn / (4 * prandtlCorrection * sinInflow * cosInflow)
-		aPrimeMomentum = kappaPrime / (1 - kappaPrime)
+		# Near singular conditions (very small inflow angle or very small F),
+		# enforce unloading to avoid non-physical induction spikes.
+		if prandtlCorrection < 1e-4 or sinInflow < 1e-3:
+			aMomentum = 0.0
+			aPrimeMomentum = 0.0
+		else:
+			kappa = solidity * dCt / (4 * prandtlCorrection * sinInflow**2)
+			aMomentum = kappa / (1 + kappa)
+			#TODO: Explain why
+			aMomentum = np.clip(aMomentum, -0.2, 0.95)
+
+			# For turbine operation, negative Ct locally implies drag-dominated section;
+			# avoid unphysical reverse-swirl divergence by unloading tangential induction.
+			if dCn <= 0:
+				aPrimeMomentum = 0.0
+			else:
+				kappaPrime = solidity * dCn / (4 * prandtlCorrection * sinInflow * cosInflow)
+				kappaPrime = np.clip(kappaPrime, 0.0, 1.0 - EPSILON)
+				aPrimeMomentum = kappaPrime / (1 - kappaPrime)
+				aPrimeMomentum = np.clip(aPrimeMomentum, 0.0, 2.0)
 
 		# Glauert correction
-		aMomentum = GlauertCorrection(aMomentum, radius, a, aPrime, solidity, dCt, solutionProperties)
+		aMomentum = GlauertCorrection(aMomentum, radius, a, aPrime, solidity, dCt, prandtlCorrection, solutionProperties)
 
 		# Check for convergence
 		if np.abs(a - aMomentum) < tolerance and np.abs(aPrime - aPrimeMomentum) < tolerance:
@@ -306,7 +304,12 @@ def SolveBEM(solutionProperties:st.SolverData):
 	"""
 	geometry = solutionProperties.geometry
 	
-	radius = np.linspace(geometry.bladeStart * geometry.tipRadius, geometry.bladeEnd * geometry.tipRadius - 0.001 * geometry.tipRadius, num=solutionProperties.elementCount) # Avoid tip singularities
+	# Use midpoint rule: elements are centred within each strip, so no element
+	# ever coincides with the blade root (where fRoot=0) or the tip.
+	r_start = geometry.bladeStart * geometry.tipRadius
+	r_end   = geometry.bladeEnd   * geometry.tipRadius
+	dr      = (r_end - r_start) / solutionProperties.elementCount
+	radius  = np.linspace(r_start + dr / 2, r_end - dr / 2, num=solutionProperties.elementCount)
 
 	dT = np.array([])
 	dQ = np.array([])

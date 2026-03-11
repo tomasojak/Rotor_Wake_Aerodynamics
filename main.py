@@ -7,40 +7,16 @@ import Plotting
 import numpy as np
 import BEM
 
-if __name__ == "__main__":
-	
-	###### PART 1: SOLVE BEM AND PLOT RESULTS ######
-
-	for tsr in [8.0]:
-		solution1 = st.SolverData()
-		solution1.setParameters(
-			maxIterations=500, 
-			tolerance=1e-6, 
-			relaxation=0.5,
-			elementCount=100)
-		
-		solution1.geometry.tipSpeedRatio = tsr
-		
-		BEM.SolveBEM(solution1)
-
-		# Plot main BEM results
-		# Plotting.plot_bem_results(solution1.result.radius, solution1.elementSolutions)
-
+def plot_pitch_variations():	# Deprecated
 	# Pitch as a function of radius
 	localSolution = st.SolverData()
 	localSolution.setParameters(
 		maxIterations=1000,
 		tolerance=1e-4,
 		relaxation=0.5,
-		elementCount=1
-	)
+		elementCount=1)
 
 	geometry = localSolution.geometry
-
-	def pitchByRadius(radiusValue):
-		return -2.0 + 4.0 * (1 - geometry.dimensionlessRadialPosition(radiusValue)) # deg
-	
-	radiusSweep = np.linspace(geometry.bladeStart * geometry.tipRadius, geometry.bladeEnd * geometry.tipRadius - 0.001 * geometry.tipRadius, num=80)
 
 	# Discretized map where each cell is one (radius, pitch) region
 	pitchMinDeg = -10.0
@@ -77,6 +53,47 @@ if __name__ == "__main__":
 			localWindPower = 0.5 * localSolution.airDensity * localRotorArea * localSolution.geometry.freeStreamVelocity**3
 			cPMap[pitchIndex, radiusIndex] = localPower / localWindPower if localWindPower > 0 else 0
 
-	# Plotting.plot_pitch_variations(radiusGrid, pitchGrid, cPMap)
-	Plotting.PlotResults(solution1)
+	Plotting.plot_pitch_variations(radiusGrid, pitchGrid, cPMap)
+
+def PartD():
+	solution = st.SolverData()
+	solution.setParameters(
+		maxIterations=500,
+		tolerance=1e-6,
+		relaxation=0.5,
+		elementCount=100
+	)
+	solution.geometry.tipSpeedRatio = 8.0
+	BEM.SolveBEM(solution)
+	Plotting.PlotResults(solution)
+
+def PartF():
+	# Prepare solutions for various numbers of annuli:
+	solutionAnnuli = []
+	minAnnuli = 5
+	maxAnnuli = 500
+	numOfAnnuli = 20
+	annuliCounts = np.linspace(minAnnuli, maxAnnuli, num=numOfAnnuli, dtype=int)
+	for annuliCount in annuliCounts:
+		solution = st.SolverData()
+		solution.setParameters(
+			maxIterations=500,
+			tolerance=1e-6,
+			relaxation=0.5,
+			elementCount=annuliCount
+		)
+		solution.geometry.tipSpeedRatio = 8.0
+		BEM.SolveBEM(solution)
+		solutionAnnuli.append(solution)
+
+	Plotting.SpacingSensitivityPlot(solutionAnnuli)
+
+if __name__ == "__main__":
+	
+	#### Part d ####
+	PartD()
+
+	#### Part f ####
+	PartF()
+
 	Plotting.ShowPlots()

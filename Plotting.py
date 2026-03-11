@@ -2,6 +2,50 @@ import numpy as np
 import matplotlib.pyplot as plt
 import SolverTools as st
 
+# ---------------------------------------------------------------------------
+# Shared style helper
+# ---------------------------------------------------------------------------
+
+def ApplyStyle(ax):
+	"""Apply a consistent visual style to a matplotlib Axes object.
+
+	Call this after adding all artists to an axes to enforce uniform
+	font sizes, line weights, label colours, and grid appearance.
+	"""
+	FONT_SIZE   = 11
+	LABEL_COLOR = "#222222"
+	GRID_COLOR  = "#cccccc"
+
+	# Tick and label font sizes
+	ax.tick_params(labelsize=FONT_SIZE - 1, colors=LABEL_COLOR)
+	ax.xaxis.label.set_size(FONT_SIZE)
+	ax.yaxis.label.set_size(FONT_SIZE)
+	ax.xaxis.label.set_color(LABEL_COLOR)
+	ax.yaxis.label.set_color(LABEL_COLOR)
+
+	# Title
+	ax.title.set_size(FONT_SIZE + 1)
+	ax.title.set_color(LABEL_COLOR)
+
+	# Legend
+	ax.legend()
+	legend = ax.get_legend()
+
+	# Thicken all plotted lines
+	for line in ax.get_lines():
+		line.set_linewidth(2.0)
+
+	# Spine (border) color and weight
+	for spine in ax.spines.values():
+		spine.set_edgecolor(LABEL_COLOR)
+		spine.set_linewidth(1.0)
+
+	# Grid style
+	ax.grid(True, color=GRID_COLOR, linewidth=0.8, linestyle="--")
+	ax.set_axisbelow(True)
+
+# ---------------------------------------------------------------------------
+
 def plot_bem_results(radius, elementSolutions):
 	"""
 	Plot the main BEM results including thrust/torque distributions and convergence metrics.
@@ -25,28 +69,28 @@ def plot_bem_results(radius, elementSolutions):
 	axs[0, 0].set_xlabel('Radius (m)')
 	axs[0, 0].set_ylabel('Convergence Precision')
 	axs[0, 0].set_yscale('log')
-	axs[0, 0].grid(True)
+	ApplyStyle(axs[0, 0])
 
 	# Iteration count plot
 	axs[0, 1].plot(radius, convergenceIterations, marker='o', color='orange')
 	axs[0, 1].set_title('Iteration Count vs Radius')
 	axs[0, 1].set_xlabel('Radius (m)')
 	axs[0, 1].set_ylabel('Iteration Count')
-	axs[0, 1].grid(True)
+	ApplyStyle(axs[0, 1])
 
 	# Prandtl correction plot
 	axs[1, 0].plot(radius, prandtlCorrection, marker='o', color='green')
 	axs[1, 0].set_title('Prandtl Correction vs Radius')
 	axs[1, 0].set_xlabel('Radius (m)')
 	axs[1, 0].set_ylabel('Prandtl Correction')
-	axs[1, 0].grid(True)
+	ApplyStyle(axs[1, 0])
 
 	# Axial induction factor plot
 	axs[1, 1].plot(radius, axialInduction, marker='o', color='red')
 	axs[1, 1].set_title('Axial Induction Factor (a) vs Radius')
 	axs[1, 1].set_xlabel('Radius (m)')
 	axs[1, 1].set_ylabel('Axial Induction Factor (a)')
-	axs[1, 1].grid(True)
+	ApplyStyle(axs[1, 1])
 
 	plt.tight_layout()
 
@@ -75,6 +119,7 @@ def plot_pitch_variations(radiusGrid, pitchGrid, cPMap):
 	ax_surface.set_ylabel('Pitch (deg)')
 	ax_surface.set_zlabel('Coefficient of Power (cP)')
 	ax_surface.legend(loc='best')
+	ApplyStyle(ax_surface)
 	plt.tight_layout()
 
 def ShowPlots():
@@ -103,36 +148,78 @@ def PlotResults(solution: st.SolverData):
 	inductionFactorsPrime = np.array([element.aPrime for element in solution.elementSolutions])
 
 
-	plt.figure()
-	plt.plot(radialPosition, inductionFactors, label='Axial Induction Factor (a)')
-	plt.plot(radialPosition, inductionFactorsPrime, label='Tangential Induction Factor (a\')')
-	plt.xlabel('Radial Position (r/R)')
-	plt.ylabel('Induction Factor')
-	plt.legend()
-	plt.grid(True)
+	fig1, ax1 = plt.subplots()
+	ax1.plot(radialPosition, inductionFactors, label='Axial Induction Factor (a)')
+	ax1.plot(radialPosition, inductionFactorsPrime, label="Tangential Induction Factor (a')")
+	ax1.set_xlabel('Radial Position (r/R)')
+	ax1.set_ylabel('Induction Factor')
+	ApplyStyle(ax1)
 
 	# Plotting the angle of attack and inflow angle
 	angleOfAttack = np.array([element.angleOfAttack for element in solution.elementSolutions])
 	inflowAngle = np.array([element.inflowAngle for element in solution.elementSolutions])
 
-	plt.figure()
-	plt.plot(radialPosition, angleOfAttack, label='Angle of Attack (alpha)')
-	plt.plot(radialPosition, inflowAngle, label='Inflow Angle (phi)')
-	plt.xlabel('Radial Position (r/R)')
-	plt.ylabel('Angle (degrees)')
-	plt.legend()
-	plt.grid(True)
+	fig2, ax2 = plt.subplots()
+	ax2.plot(radialPosition, np.rad2deg(angleOfAttack), label='Angle of Attack (alpha)')
+	ax2.plot(radialPosition, np.rad2deg(inflowAngle), label='Inflow Angle (phi)')
+	ax2.set_xlabel('Radial Position (r/R)')
+	ax2.set_ylabel('Angle (degrees)')
+	ApplyStyle(ax2)
 
 	# Plotting the force coefficients
 	Ct = np.array([element.dCt for element in solution.elementSolutions])
 	Cn = np.array([element.dCn for element in solution.elementSolutions])
 	Cq = np.array([element.dCq for element in solution.elementSolutions])
 
-	plt.figure()
-	plt.plot(radialPosition, Ct, label='Thrust Coefficient (dCt)')
-	plt.plot(radialPosition, Cn, label='Normal Force Coefficient (dCn)')
-	plt.plot(radialPosition, Cq, label='Torque Coefficient (dCq)')
-	plt.xlabel('Radial Position (r/R)')
-	plt.ylabel('Coefficient')
-	plt.legend()
-	plt.grid(True)
+	fig3, ax3 = plt.subplots()
+	ax3.plot(radialPosition, Ct, label='Thrust Coefficient (dCt)')
+	ax3.plot(radialPosition, Cn, label='Normal Force Coefficient (dCn)')
+	ax3.plot(radialPosition, Cq, label='Torque Coefficient (dCq)')
+	ax3.set_xlabel('Radial Position (r/R)')
+	ax3.set_ylabel('Coefficient')
+	ApplyStyle(ax3)
+
+##### Task e #####
+def TipCorrectionPlot(solution: st.SolverData):
+	"""
+	Plot the Prandtl tip correction factor along the blade radial position.
+	"""
+
+	tipRadius = solution.geometry.tipRadius
+	radius = np.array([element.radius for element in solution.elementSolutions])
+	radialPosition = radius / tipRadius
+
+	prandtlCorrection = np.array([element.prandtlCorrection for element in solution.elementSolutions])
+
+	fig, ax = plt.subplots()
+	ax.plot(radialPosition, prandtlCorrection, label='Prandtl Tip Correction Factor')
+	ax.set_xlabel('Radial Position (r/R)')
+	ax.set_ylabel('Prandtl Tip Correction Factor')
+	ApplyStyle(ax)
+
+def SpacingSensitivityPlot(solutionsList):
+	"""
+	Plot the convergence precision and iteration count for different element counts to analyze sensitivity to blade discretization.
+	"""
+	elementCounts = np.array([solution.elementCount for solution in solutionsList])
+	convergencePrecisions = np.array([solution.getConvergencePrecision() for solution in solutionsList])
+	iterationCounts = np.array([solution.getIterationsCount() for solution in solutionsList])
+
+	fig, ax1 = plt.subplots()
+
+	color = 'tab:blue'
+	ax1.set_xlabel('Element Count')
+	ax1.set_ylabel('Convergence Precision', color=color)
+	ax1.plot(elementCounts, convergencePrecisions, marker='o', color=color)
+	ax1.set_yscale('log')
+	ax1.tick_params(axis='y', labelcolor=color)
+
+	ax2 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
+
+	color = 'tab:orange'
+	ax2.set_ylabel('Iteration Count', color=color)  # we already handled the x-label with ax1
+	ax2.plot(elementCounts, iterationCounts, marker='o', color=color)
+	ax2.tick_params(axis='y', labelcolor=color)
+
+	fig.tight_layout()  # otherwise the right y-label is slightly clipped
+	ApplyStyle(ax1)

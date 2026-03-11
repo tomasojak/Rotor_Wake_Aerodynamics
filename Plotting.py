@@ -1,14 +1,13 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import SolverTools as st
 
-def plot_bem_results(radius, dT, dQ, elementSolutions):
+def plot_bem_results(radius, elementSolutions):
 	"""
 	Plot the main BEM results including thrust/torque distributions and convergence metrics.
 
 	Args:
 		radius: Array of radial positions
-		dT: Array of differential thrust values
-		dQ: Array of differential torque values
 		elementSolutions: List of IterationSolution objects containing convergence data
 	"""
 
@@ -83,3 +82,57 @@ def ShowPlots():
 	Display all created matplotlib figures.
 	"""
 	plt.show()
+
+##### Task d #####
+def PlotResults(solution: st.SolverData):
+	"""
+	Plot:
+	- a, a' distributions along the blade radial position
+	- angle of attack distribution along the blade raidal position
+	- inflow angle distribution along the blade radial position
+	- Ct, Cn, Cq distribution along the blade radial position
+	"""
+
+	tipRadius = solution.geometry.tipRadius
+	radius = np.array([element.radius for element in solution.elementSolutions])
+
+	radialPosition = radius / tipRadius
+
+	# Plotting the induction factors
+	inductionFactors = np.array([element.a for element in solution.elementSolutions])
+	inductionFactorsPrime = np.array([element.aPrime for element in solution.elementSolutions])
+
+
+	plt.figure()
+	plt.plot(radialPosition, inductionFactors, label='Axial Induction Factor (a)')
+	plt.plot(radialPosition, inductionFactorsPrime, label='Tangential Induction Factor (a\')')
+	plt.xlabel('Radial Position (r/R)')
+	plt.ylabel('Induction Factor')
+	plt.legend()
+	plt.grid(True)
+
+	# Plotting the angle of attack and inflow angle
+	angleOfAttack = np.array([element.angleOfAttack for element in solution.elementSolutions])
+	inflowAngle = np.array([element.inflowAngle for element in solution.elementSolutions])
+
+	plt.figure()
+	plt.plot(radialPosition, angleOfAttack, label='Angle of Attack (alpha)')
+	plt.plot(radialPosition, inflowAngle, label='Inflow Angle (phi)')
+	plt.xlabel('Radial Position (r/R)')
+	plt.ylabel('Angle (degrees)')
+	plt.legend()
+	plt.grid(True)
+
+	# Plotting the force coefficients
+	Ct = np.array([element.dCt for element in solution.elementSolutions])
+	Cn = np.array([element.dCn for element in solution.elementSolutions])
+	Cq = np.array([element.dCq for element in solution.elementSolutions])
+
+	plt.figure()
+	plt.plot(radialPosition, Ct, label='Thrust Coefficient (dCt)')
+	plt.plot(radialPosition, Cn, label='Normal Force Coefficient (dCn)')
+	plt.plot(radialPosition, Cq, label='Torque Coefficient (dCq)')
+	plt.xlabel('Radial Position (r/R)')
+	plt.ylabel('Coefficient')
+	plt.legend()
+	plt.grid(True)

@@ -159,17 +159,17 @@ def SolveInduction(
 	Applies the BEM algorithm with Prandtl tip/root loss and Glauert corrections:
 	1. Start with initial guess from previous solution or default values
 	2. Iterative loop:
-	   - Calculate BEM element forces
-	   - Apply Prandtl tip/root loss correction
-	   - Use momentum theory to find new induction factors
-	   - Apply Glauert correction for high induction
-	   - Update with relaxation factor
+		- Calculate BEM element forces
+		- Apply Prandtl tip/root loss correction
+		- Use momentum theory to find new induction factors
+		- Apply Glauert correction for high induction
+		- Update with relaxation factor
 	3. Repeat until convergence or max iterations reached
 	
 	Args:
 		radius: Radial position along the blade (m)
 		solutionProperties: SolverData instance containing geometry, solver settings,
-		                    and convergence history
+			and convergence history
 		
 	Returns:
 		Tuple of (a, aPrime) - converged axial and tangential induction factors
@@ -196,34 +196,51 @@ def SolveInduction(
 	for iteration in range(maxIterations):
 
 		# Find the forces on the blade element
-		dCax, dCtg = BEMElement(radius, a, aPrime, solutionProperties)
+		dCt, dCn = BEMElement(radius, a, aPrime, solutionProperties)
+		dCq = dCn * radius
 
 		prandtlCorrection = PrandtlCorrection(radius, a, solutionProperties)
 
+		inflowAngle = Inflowangle(radius, a, aPrime, solutionProperties)
+		angleOfAttack = AngleOfAttack(radius, a, aPrime, solutionProperties)
+		
 		# At tip, Prandtl correction will converge to 0 and we reach unity (DIV0)
 		# HACK: We can assume minimal change and return values from previous solution
 		if prandtlCorrection < 1e-6:
-			solutionProperties.addSolutionIteration(st.IterationSolution(radius, a, aPrime, iteration, 0.0, prandtlCorrection))
+			solutionProperties.addSolutionIteration(st.IterationSolution(
+				radius,
+				a, 
+				aPrime,
+				iteration, 
+				0.0, 
+				prandtlCorrection,
+				angleOfAttack,
+				inflowAngle,
+				dCt, 
+				dCn, 
+				dCq))
 			return a, aPrime
 
-		inflowAngle = Inflowangle(radius, a, aPrime, solutionProperties)
 
 		# Correct induction factors
 		sinInflow = np.maximum(np.sin(inflowAngle), EPSILON)
 		cosInflow = np.cos(inflowAngle)
-		kappa = solidity * dCax / (4 * prandtlCorrection * sinInflow**2)
+		kappa = solidity * dCt / (4 * prandtlCorrection * sinInflow**2)
 		aMomentum = kappa / (1 + kappa)
 
-		kappaPrime = solidity * dCtg / (4 * prandtlCorrection * sinInflow * cosInflow)
+		kappaPrime = solidity * dCn / (4 * prandtlCorrection * sinInflow * cosInflow)
 		aPrimeMomentum = kappaPrime / (1 - kappaPrime)
 
 		# Glauert correction
-		aMomentum = GlauertCorrection(aMomentum, radius, a, aPrime, solidity, dCax, solutionProperties)
+		aMomentum = GlauertCorrection(aMomentum, radius, a, aPrime, solidity, dCt, solutionProperties)
 
 		# Check for convergence
 		if np.abs(a - aMomentum) < tolerance and np.abs(aPrime - aPrimeMomentum) < tolerance:
 
 			# We have converged!
+
+			dCq = dCn * radius # Torque coefficient
+
 			solution = st.IterationSolution(
 				radius, 
 				aMomentum, 
@@ -231,7 +248,12 @@ def SolveInduction(
 				iteration, 
 				max(np.abs(a - aMomentum), 
 				np.abs(aPrime - aPrimeMomentum)), 
-				prandtlCorrection)
+				prandtlCorrection,
+				angleOfAttack,
+				inflowAngle,
+				dCt,
+				dCn,
+				dCq)
 			
 			solutionProperties.addSolutionIteration(solution)
 			
@@ -255,15 +277,15 @@ def solveElement(radius:float, solutionProperties:st.SolverData=None) -> tuple:
 		solutionProperties (SolutionProperties): An instance of SolutionProperties containing settings for the solver and convergence history
 	"""
 	a, aPrime = SolveInduction(radius, solutionProperties)
-	dCax, dCtg = BEMElement(radius, a, aPrime, solutionProperties)
+	dCt, dCn = BEMElement(radius, a, aPrime, solutionProperties)
 
 	geometry = solutionProperties.geometry
 	airDensity = solutionProperties.airDensity
 
 	relativeVelocity = np.sqrt((geometry.freeStreamVelocity * (1 - a))**2 + (geometry.rotationalSpeed * radius * (1 + aPrime))**2)
 
-	dT = 0.5 * airDensity * relativeVelocity**2 * geometry.bladeNumber * geometry.chordFunction(radius) * dCax
-	dQ = 0.5 * airDensity * relativeVelocity**2 * geometry.bladeNumber * geometry.chordFunction(radius) * radius * dCtg
+	dT = 0.5 * airDensity * relativeVelocity**2 * geometry.bladeNumber * geometry.chordFunction(radius) * dCt
+	dQ = 0.5 * airDensity * relativeVelocity**2 * geometry.bladeNumber * geometry.chordFunction(radius) * radius * dCn
 
 	return dT, dQ
 
@@ -277,7 +299,7 @@ def SolveBEM(solutionProperties:st.SolverData):
 	
 	Args:
 		solutionProperties: SolverData instance containing geometry, solver settings,
-		                    and will be updated with results
+			and will be updated with results
 		
 	Returns:
 		None (results are stored in solutionProperties.result)
@@ -331,77 +353,3 @@ def SolveBEM(solutionProperties:st.SolverData):
 	solutionProperties.result = st.Result(radius, dT, dQ, cP, thrust, torque)
 
 	return
-
-if __name__ == "__main__":
-
-	###### PART 1: SOLVE BEM AND PLOT RESULTS ######
-
-	for tsr in [8.0]:
-		solution1 = st.SolverData()
-		solution1.setParameters(
-			maxIterations=500, 
-			tolerance=1e-6, 
-			relaxation=0.5,
-			elementCount=100)
-		
-		solution1.geometry.tipSpeedRatio = tsr
-		
-		SolveBEM(solution1)
-
-		# Plot main BEM results
-		BEMPlotting.plot_bem_results(solution1.result.radius, solution1.result.dT, solution1.result.dQ, solution1.elementSolutions)
-
-	# Pitch as a function of radius
-	localSolution = st.SolverData()
-	localSolution.setParameters(
-		maxIterations=1000,
-		tolerance=1e-4,
-		relaxation=0.5,
-		elementCount=1
-	)
-
-	geometry = localSolution.geometry
-
-	def pitchByRadius(radiusValue):
-		return -2.0 + 4.0 * (1 - geometry.dimensionlessRadialPosition(radiusValue)) # deg
-	
-	radiusSweep = np.linspace(geometry.bladeStart * geometry.tipRadius, geometry.bladeEnd * geometry.tipRadius - 0.001 * geometry.tipRadius, num=80)
-
-	# Discretized map where each cell is one (radius, pitch) region
-	pitchMinDeg = -10.0
-	pitchMaxDeg = 10.0
-	pitchBins = 50
-	radiusBins = 80
-
-	pitchGrid = np.linspace(pitchMinDeg, pitchMaxDeg, num=pitchBins)
-	radiusGrid = np.linspace(geometry.bladeStart * geometry.tipRadius, geometry.bladeEnd * geometry.tipRadius - 0.001 * geometry.tipRadius, num=radiusBins)
-
-	dTMap = np.zeros((pitchBins, radiusBins))
-	dQMap = np.zeros((pitchBins, radiusBins))
-	cPMap = np.zeros((pitchBins, radiusBins))
-
-	for pitchIndex, pitchValue in enumerate(pitchGrid):
-		for radiusIndex, radiusValue in enumerate(radiusGrid):
-			
-
-			# Override the blade pitch for this solution
-			localSolution.geometry.bladePitch = pitchValue
-
-			# NOTE: Pitch angle should be constant along the blade???
-			# NOTE: There is an optimal inflow angle for maximum power, see cp of the airfoil
-			#	Maybe we just need to enforce the optimal angle of attack for all radii to get best performance?
-			# 	Could be compared to this approach I guess 
-
-			dTValue, dQValue = solveElement(radiusValue, localSolution)
-			dTMap[pitchIndex, radiusIndex] = dTValue
-			dQMap[pitchIndex, radiusIndex] = dQValue
-			
-			# Calculate local cP
-			localPower = dQValue * localSolution.geometry.rotationalSpeed
-			localRotorArea = np.pi * localSolution.geometry.tipRadius**2
-			localWindPower = 0.5 * localSolution.airDensity * localRotorArea * localSolution.geometry.freeStreamVelocity**3
-			cPMap[pitchIndex, radiusIndex] = localPower / localWindPower if localWindPower > 0 else 0
-
-	BEMPlotting.plot_pitch_variations(radiusGrid, pitchGrid, cPMap)
-
-	BEMPlotting.ShowPlots()

@@ -86,7 +86,18 @@ class IterationSolution:
 	"""
 	Class to hold the solution of a single iteration for a blade element.
 	"""
-	def __init__(self, radius, a, aPrime, iterations, precision, prandtlCorrection):
+	def __init__(self, 
+			radius, 
+			a, 
+			aPrime, 
+			iterations, 
+			precision, 
+			prandtlCorrection,
+			angleOfAttack,
+			inflowAngle,
+			dCt, 
+			dCn, 
+			dCq):
 		self.radius = radius
 		self.a = a
 		self.aPrime = aPrime
@@ -94,7 +105,12 @@ class IterationSolution:
 		self.precision = precision
 		self.converged = precision < 1e-6 # This should be consistent with the tolerance used in the solver
 		self.prandtlCorrection = prandtlCorrection
-		
+		self.angleOfAttack = angleOfAttack
+		self.inflowAngle = inflowAngle
+		self.dCt = dCt
+		self.dCn = dCn
+		self.dCq = dCq
+
 class Result:
 	"""
 	Class to hold the final results of the BEM solver, including thrust, torque, and coefficient of power.

@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import SolverTools as st
+from pathlib import Path
 
 def plot_bem_results(radius, elementSolutions):
 	"""
@@ -88,9 +89,9 @@ def PlotResults(solution: st.SolverData):
 	"""
 	Plot:
 	- a, a' distributions along the blade radial position
-	- angle of attack distribution along the blade raidal position
+	- angle of attack distribution along the blade radial position
 	- inflow angle distribution along the blade radial position
-	- Ct, Cn, Cq distribution along the blade radial position
+	- axial and azimuthal sectional force coefficients
 	"""
 
 	tipRadius = solution.geometry.tipRadius
@@ -112,8 +113,8 @@ def PlotResults(solution: st.SolverData):
 	plt.grid(True)
 
 	# Plotting the angle of attack and inflow angle
-	angleOfAttack = np.array([element.angleOfAttack for element in solution.elementSolutions])
-	inflowAngle = np.array([element.inflowAngle for element in solution.elementSolutions])
+	angleOfAttack = np.rad2deg(np.array([element.angleOfAttack for element in solution.elementSolutions]))
+	inflowAngle = np.rad2deg(np.array([element.inflowAngle for element in solution.elementSolutions]))
 
 	plt.figure()
 	plt.plot(radialPosition, angleOfAttack, label='Angle of Attack (alpha)')
@@ -124,15 +125,419 @@ def PlotResults(solution: st.SolverData):
 	plt.grid(True)
 
 	# Plotting the force coefficients
-	Ct = np.array([element.dCt for element in solution.elementSolutions])
-	Cn = np.array([element.dCn for element in solution.elementSolutions])
-	Cq = np.array([element.dCq for element in solution.elementSolutions])
+	cAxial = np.array([element.axialForceCoefficient for element in solution.elementSolutions])
+	cAzimuthal = np.array([element.azimuthalForceCoefficient for element in solution.elementSolutions])
 
 	plt.figure()
-	plt.plot(radialPosition, Ct, label='Thrust Coefficient (dCt)')
-	plt.plot(radialPosition, Cn, label='Normal Force Coefficient (dCn)')
-	plt.plot(radialPosition, Cq, label='Torque Coefficient (dCq)')
+	plt.plot(radialPosition, cAxial, label='Axial Force Coefficient')
+	plt.plot(radialPosition, cAzimuthal, label='Azimuthal Force Coefficient')
 	plt.xlabel('Radial Position (r/R)')
 	plt.ylabel('Coefficient')
 	plt.legend()
 	plt.grid(True)
+
+
+def PlotSpanwiseResults(solution: st.SolverData):
+	"""
+	Create report-ready spanwise plots for one TSR case.
+	Returns the created figure.
+	"""
+	tipRadius = solution.geometry.tipRadius
+	radius = np.array([element.radius for element in solution.elementSolutions])
+	radialPosition = radius / tipRadius
+
+	inductionFactors = np.array([element.a for element in solution.elementSolutions])
+	inductionFactorsPrime = np.array([element.aPrime for element in solution.elementSolutions])
+	angleOfAttack = np.rad2deg(np.array([element.angleOfAttack for element in solution.elementSolutions]))
+	inflowAngle = np.rad2deg(np.array([element.inflowAngle for element in solution.elementSolutions]))
+	cAxial = np.array([element.axialForceCoefficient for element in solution.elementSolutions])
+	cAzimuthal = np.array([element.azimuthalForceCoefficient for element in solution.elementSolutions])
+	dT = solution.result.dT
+	dQ = solution.result.dQ
+
+	fig, axs = plt.subplots(2, 2, figsize=(13, 9))
+	fig.suptitle(f'Spanwise Results for TSR = {solution.geometry.tipSpeedRatio:.1f}')
+
+	axs[0, 0].plot(radialPosition, inductionFactors, label='a', linewidth=2)
+	axs[0, 0].plot(radialPosition, inductionFactorsPrime, label="a'", linewidth=2)
+	axs[0, 0].set_xlabel('Radial Position (r/R)')
+	axs[0, 0].set_ylabel('Induction Factor [-]')
+	axs[0, 0].grid(True)
+	axs[0, 0].legend()
+
+	axs[0, 1].plot(radialPosition, angleOfAttack, label='alpha', linewidth=2)
+	axs[0, 1].plot(radialPosition, inflowAngle, label='phi', linewidth=2)
+	axs[0, 1].set_xlabel('Radial Position (r/R)')
+	axs[0, 1].set_ylabel('Angle [deg]')
+	axs[0, 1].grid(True)
+	axs[0, 1].legend()
+
+	axs[1, 0].plot(radialPosition, cAxial, label='C axial', linewidth=2)
+	axs[1, 0].plot(radialPosition, cAzimuthal, label='C azimuthal', linewidth=2)
+	axs[1, 0].set_xlabel('Radial Position (r/R)')
+	axs[1, 0].set_ylabel('Section Coefficient [-]')
+	axs[1, 0].grid(True)
+	axs[1, 0].legend()
+
+	loadAxis = axs[1, 1]
+	torqueAxis = loadAxis.twinx()
+	loadLine = loadAxis.plot(radialPosition, dT, label='dT', linewidth=2, color='tab:blue')
+	torqueLine = torqueAxis.plot(radialPosition, dQ, label='dQ', linewidth=2, color='tab:orange')
+	loadAxis.set_xlabel('Radial Position (r/R)')
+	loadAxis.set_ylabel('dT [N/m]', color='tab:blue')
+	torqueAxis.set_ylabel('dQ [Nm/m]', color='tab:orange')
+	loadAxis.tick_params(axis='y', labelcolor='tab:blue')
+	torqueAxis.tick_params(axis='y', labelcolor='tab:orange')
+	loadAxis.grid(True)
+	loadAxis.legend(loadLine + torqueLine, ['dT', 'dQ'], loc='upper left')
+
+	fig.tight_layout()
+	return fig
+
+
+def PlotPerformanceComparison(solutions: list[st.SolverData]):
+	"""
+	Create comparison plots across tip-speed ratios.
+	Returns the created figure.
+	"""
+	tsr = np.array([solution.geometry.tipSpeedRatio for solution in solutions])
+	thrust = np.array([solution.result.totalThrust for solution in solutions])
+	torque = np.array([solution.result.totalTorque for solution in solutions])
+	cp = np.array([solution.result.cP for solution in solutions])
+	ct = np.array([
+		solution.result.totalThrust / (
+			0.5 * solution.airDensity * np.pi * solution.geometry.tipRadius ** 2 * solution.geometry.freeStreamVelocity ** 2
+		)
+		for solution in solutions
+	])
+	power = torque * np.array([solution.geometry.rotationalSpeed for solution in solutions])
+
+	fig, axs = plt.subplots(3, 2, figsize=(12, 11))
+	fig.suptitle('Baseline Rotor Performance Comparison')
+
+	axs[0, 0].plot(tsr, cp, marker='o', linewidth=2)
+	axs[0, 0].set_xlabel('Tip Speed Ratio [-]')
+	axs[0, 0].set_ylabel('CP [-]')
+	axs[0, 0].grid(True)
+
+	axs[0, 1].plot(tsr, ct, marker='o', linewidth=2)
+	axs[0, 1].set_xlabel('Tip Speed Ratio [-]')
+	axs[0, 1].set_ylabel('CT [-]')
+	axs[0, 1].grid(True)
+
+	axs[1, 0].plot(tsr, thrust, marker='o', linewidth=2)
+	axs[1, 0].set_xlabel('Tip Speed Ratio [-]')
+	axs[1, 0].set_ylabel('Thrust [N]')
+	axs[1, 0].grid(True)
+
+	axs[1, 1].plot(tsr, torque, marker='o', linewidth=2)
+	axs[1, 1].set_xlabel('Tip Speed Ratio [-]')
+	axs[1, 1].set_ylabel('Torque [Nm]')
+	axs[1, 1].grid(True)
+
+	axs[2, 0].plot(tsr, power, marker='o', linewidth=2)
+	axs[2, 0].set_xlabel('Tip Speed Ratio [-]')
+	axs[2, 0].set_ylabel('Power [W]')
+	axs[2, 0].grid(True)
+
+	axs[2, 1].axis('off')
+
+	fig.tight_layout()
+	return fig
+
+
+def PlotAnglesComparison(solutions: list[st.SolverData]):
+	fig, axs = plt.subplots(1, 2, figsize=(12, 4.5))
+	fig.suptitle('Task d.a: Spanwise Angle Distributions')
+	for solution in solutions:
+		radial = solution.result.radius / solution.geometry.tipRadius
+		alpha = np.rad2deg(np.array([element.angleOfAttack for element in solution.elementSolutions]))
+		phi = np.rad2deg(np.array([element.inflowAngle for element in solution.elementSolutions]))
+		label = f"TSR {solution.geometry.tipSpeedRatio:.0f}"
+		axs[0].plot(radial, alpha, linewidth=2, label=label)
+		axs[1].plot(radial, phi, linewidth=2, label=label)
+
+	axs[0].set_xlabel('Radial Position (r/R)')
+	axs[0].set_ylabel('Angle of Attack [deg]')
+	axs[0].grid(True)
+	axs[0].legend()
+
+	axs[1].set_xlabel('Radial Position (r/R)')
+	axs[1].set_ylabel('Inflow Angle [deg]')
+	axs[1].grid(True)
+	axs[1].legend()
+
+	fig.tight_layout()
+	return fig
+
+
+def PlotInductionComparison(solutions: list[st.SolverData]):
+	fig, axs = plt.subplots(1, 2, figsize=(12, 4.5))
+	fig.suptitle('Task d.b: Spanwise Induction Distributions')
+	for solution in solutions:
+		radial = solution.result.radius / solution.geometry.tipRadius
+		a = np.array([element.a for element in solution.elementSolutions])
+		aPrime = np.array([element.aPrime for element in solution.elementSolutions])
+		label = f"TSR {solution.geometry.tipSpeedRatio:.0f}"
+		axs[0].plot(radial, a, linewidth=2, label=label)
+		axs[1].plot(radial, aPrime, linewidth=2, label=label)
+
+	axs[0].set_xlabel('Radial Position (r/R)')
+	axs[0].set_ylabel('Axial Induction a [-]')
+	axs[0].grid(True)
+	axs[0].legend()
+
+	axs[1].set_xlabel('Radial Position (r/R)')
+	axs[1].set_ylabel("Azimuthal Induction a' [-]")
+	axs[1].grid(True)
+	axs[1].legend()
+
+	fig.tight_layout()
+	return fig
+
+
+def PlotLoadingComparison(solutions: list[st.SolverData]):
+	fig, axs = plt.subplots(1, 2, figsize=(12, 4.5))
+	fig.suptitle('Task d.c: Spanwise Load Distributions')
+	for solution in solutions:
+		radial = solution.result.radius / solution.geometry.tipRadius
+		label = f"TSR {solution.geometry.tipSpeedRatio:.0f}"
+		axs[0].plot(radial, solution.result.dT, linewidth=2, label=label)
+		axs[1].plot(radial, solution.result.dQ, linewidth=2, label=label)
+
+	axs[0].set_xlabel('Radial Position (r/R)')
+	axs[0].set_ylabel('Thrust Loading dT [N/m]')
+	axs[0].grid(True)
+	axs[0].legend()
+
+	axs[1].set_xlabel('Radial Position (r/R)')
+	axs[1].set_ylabel('Azimuthal Loading dQ [Nm/m]')
+	axs[1].grid(True)
+	axs[1].legend()
+
+	fig.tight_layout()
+	return fig
+
+
+def PlotTipCorrectionTotals(withTipSolutions: list[st.SolverData], withoutTipSolutions: list[st.SolverData]):
+	fig, axs = plt.subplots(2, 2, figsize=(12, 8))
+	fig.suptitle('Task e: Influence of Tip/Root Correction on Integrated Performance')
+
+	tsr = np.array([solution.geometry.tipSpeedRatio for solution in withTipSolutions])
+	cp_with = np.array([solution.result.cP for solution in withTipSolutions])
+	cp_without = np.array([solution.result.cP for solution in withoutTipSolutions])
+	ct_with = np.array([
+		solution.result.totalThrust / (
+			0.5 * solution.airDensity * np.pi * solution.geometry.tipRadius ** 2 * solution.geometry.freeStreamVelocity ** 2
+		)
+		for solution in withTipSolutions
+	])
+	ct_without = np.array([
+		solution.result.totalThrust / (
+			0.5 * solution.airDensity * np.pi * solution.geometry.tipRadius ** 2 * solution.geometry.freeStreamVelocity ** 2
+		)
+		for solution in withoutTipSolutions
+	])
+	thrust_with = np.array([solution.result.totalThrust for solution in withTipSolutions])
+	thrust_without = np.array([solution.result.totalThrust for solution in withoutTipSolutions])
+	torque_with = np.array([solution.result.totalTorque for solution in withTipSolutions])
+	torque_without = np.array([solution.result.totalTorque for solution in withoutTipSolutions])
+
+	series = [
+		(axs[0, 0], cp_with, cp_without, 'CP [-]'),
+		(axs[0, 1], ct_with, ct_without, 'CT [-]'),
+		(axs[1, 0], thrust_with, thrust_without, 'Thrust [N]'),
+		(axs[1, 1], torque_with, torque_without, 'Torque [Nm]'),
+	]
+	for axis, with_values, without_values, ylabel in series:
+		axis.plot(tsr, with_values, marker='o', linewidth=2, label='With Prandtl')
+		axis.plot(tsr, without_values, marker='s', linewidth=2, label='Without Prandtl')
+		axis.set_xlabel('Tip Speed Ratio [-]')
+		axis.set_ylabel(ylabel)
+		axis.grid(True)
+		axis.legend()
+
+	fig.tight_layout()
+	return fig
+
+
+def PlotTipCorrectionSpanwise(withTip: st.SolverData, withoutTip: st.SolverData):
+	fig, axs = plt.subplots(2, 2, figsize=(12, 8))
+	fig.suptitle(f'Task e: Spanwise Influence of Tip/Root Correction at TSR = {withTip.geometry.tipSpeedRatio:.0f}')
+
+	radial = withTip.result.radius / withTip.geometry.tipRadius
+	phi_with = np.rad2deg(np.array([element.inflowAngle for element in withTip.elementSolutions]))
+	phi_without = np.rad2deg(np.array([element.inflowAngle for element in withoutTip.elementSolutions]))
+	a_with = np.array([element.a for element in withTip.elementSolutions])
+	a_without = np.array([element.a for element in withoutTip.elementSolutions])
+	factor_with = np.array([element.prandtlCorrection for element in withTip.elementSolutions])
+
+	axs[0, 0].plot(radial, factor_with, linewidth=2)
+	axs[0, 0].set_xlabel('Radial Position (r/R)')
+	axs[0, 0].set_ylabel('Prandtl Factor F [-]')
+	axs[0, 0].grid(True)
+
+	axs[0, 1].plot(radial, a_with, linewidth=2, label='With Prandtl')
+	axs[0, 1].plot(radial, a_without, linewidth=2, label='Without Prandtl')
+	axs[0, 1].set_xlabel('Radial Position (r/R)')
+	axs[0, 1].set_ylabel('Axial Induction a [-]')
+	axs[0, 1].grid(True)
+	axs[0, 1].legend()
+
+	axs[1, 0].plot(radial, withTip.result.dT, linewidth=2, label='With Prandtl')
+	axs[1, 0].plot(radial, withoutTip.result.dT, linewidth=2, label='Without Prandtl')
+	axs[1, 0].set_xlabel('Radial Position (r/R)')
+	axs[1, 0].set_ylabel('Thrust Loading dT [N/m]')
+	axs[1, 0].grid(True)
+	axs[1, 0].legend()
+
+	axs[1, 1].plot(radial, phi_with, linewidth=2, label='With Prandtl')
+	axs[1, 1].plot(radial, phi_without, linewidth=2, label='Without Prandtl')
+	axs[1, 1].set_xlabel('Radial Position (r/R)')
+	axs[1, 1].set_ylabel('Inflow Angle [deg]')
+	axs[1, 1].grid(True)
+	axs[1, 1].legend()
+
+	fig.tight_layout()
+	return fig
+
+
+def PlotAnnuliStudy(studyRows: list[dict], referenceThrust: float):
+	fig, axs = plt.subplots(2, 2, figsize=(12, 8))
+	fig.suptitle('Task f: Annuli Count, Spacing Method, and Total-Thrust Convergence')
+
+	spacing_methods = sorted({row['spacing'] for row in studyRows})
+	for spacing in spacing_methods:
+		subset = [row for row in studyRows if row['spacing'] == spacing]
+		counts = np.array([row['annuli'] for row in subset])
+		thrust = np.array([row['thrust'] for row in subset])
+		cp = np.array([row['cp'] for row in subset])
+		error = np.array([row['relative_error_percent'] for row in subset])
+		iterations = np.array([row['mean_iterations'] for row in subset])
+		label = spacing.capitalize()
+		axs[0, 0].plot(counts, thrust, marker='o', linewidth=2, label=label)
+		axs[0, 1].plot(counts, error, marker='o', linewidth=2, label=label)
+		axs[1, 0].plot(counts, cp, marker='o', linewidth=2, label=label)
+		axs[1, 1].plot(counts, iterations, marker='o', linewidth=2, label=label)
+
+	axs[0, 0].axhline(referenceThrust, color='k', linestyle='--', linewidth=1.5, label='Reference')
+	axs[0, 0].set_xlabel('Number of Annuli [-]')
+	axs[0, 0].set_ylabel('Total Thrust [N]')
+	axs[0, 0].grid(True)
+	axs[0, 0].legend()
+
+	axs[0, 1].set_xlabel('Number of Annuli [-]')
+	axs[0, 1].set_ylabel('Thrust Error [%]')
+	axs[0, 1].grid(True)
+	axs[0, 1].legend()
+
+	axs[1, 0].set_xlabel('Number of Annuli [-]')
+	axs[1, 0].set_ylabel('CP [-]')
+	axs[1, 0].grid(True)
+	axs[1, 0].legend()
+
+	axs[1, 1].set_xlabel('Number of Annuli [-]')
+	axs[1, 1].set_ylabel('Mean Iterations per Element [-]')
+	axs[1, 1].grid(True)
+	axs[1, 1].legend()
+
+	fig.tight_layout()
+	return fig
+
+
+def PlotSpacingDistribution(constantEdges: np.ndarray, cosineEdges: np.ndarray):
+	fig, axs = plt.subplots(1, 2, figsize=(12, 4.5))
+	fig.suptitle('Task f: Radial Spacing Methods')
+
+	constant_centers = 0.5 * (constantEdges[:-1] + constantEdges[1:])
+	cosine_centers = 0.5 * (cosineEdges[:-1] + cosineEdges[1:])
+	constant_width = np.diff(constantEdges)
+	cosine_width = np.diff(cosineEdges)
+
+	axs[0].plot(np.arange(1, len(constant_centers) + 1), constant_centers, marker='o', linewidth=2, label='Constant')
+	axs[0].plot(np.arange(1, len(cosine_centers) + 1), cosine_centers, marker='s', linewidth=2, label='Cosine')
+	axs[0].set_xlabel('Annulus Index [-]')
+	axs[0].set_ylabel('Annulus Center r [m]')
+	axs[0].grid(True)
+	axs[0].legend()
+
+	axs[1].plot(np.arange(1, len(constant_width) + 1), constant_width, marker='o', linewidth=2, label='Constant')
+	axs[1].plot(np.arange(1, len(cosine_width) + 1), cosine_width, marker='s', linewidth=2, label='Cosine')
+	axs[1].set_xlabel('Annulus Index [-]')
+	axs[1].set_ylabel('Annulus Width [m]')
+	axs[1].grid(True)
+	axs[1].legend()
+
+	fig.tight_layout()
+	return fig
+
+
+def PlotAirfoilOperationalPolar(alphaPolarDeg, clPolar, cdPolar, caseAlphaDeg, caseCl, caseCd, radialPosition):
+	fig, axs = plt.subplots(1, 2, figsize=(12, 4.5))
+	fig.suptitle('Task j: Airfoil Operational Points for Selected Baseline Case')
+
+	scatter = axs[0].scatter(caseAlphaDeg, caseCl, c=radialPosition, cmap='viridis', s=25, label='Operating points')
+	axs[0].plot(alphaPolarDeg, clPolar, linewidth=2, color='tab:blue', label='Polar')
+	axs[0].set_xlabel('Angle of Attack [deg]')
+	axs[0].set_ylabel('Lift Coefficient Cl [-]')
+	axs[0].grid(True)
+	axs[0].legend()
+
+	axs[1].scatter(caseAlphaDeg, caseCd, c=radialPosition, cmap='viridis', s=25, label='Operating points')
+	axs[1].plot(alphaPolarDeg, cdPolar, linewidth=2, color='tab:red', label='Polar')
+	axs[1].set_xlabel('Angle of Attack [deg]')
+	axs[1].set_ylabel('Drag Coefficient Cd [-]')
+	axs[1].grid(True)
+	axs[1].legend()
+
+	colorbar = fig.colorbar(scatter, ax=axs, shrink=0.9)
+	colorbar.set_label('Radial Position r/R [-]')
+
+	fig.tight_layout()
+	return fig
+
+
+def PlotAirfoilSpanwise(radialPosition, alphaDeg, cl, cd, clToCd, chord):
+	fig, axs = plt.subplots(2, 2, figsize=(12, 8))
+	fig.suptitle('Task j: Spanwise Airfoil Operating State and Chord Relation')
+
+	axs[0, 0].plot(radialPosition, alphaDeg, linewidth=2)
+	axs[0, 0].set_xlabel('Radial Position (r/R)')
+	axs[0, 0].set_ylabel('Angle of Attack [deg]')
+	axs[0, 0].grid(True)
+
+	axs[0, 1].plot(radialPosition, cl, linewidth=2, label='Cl')
+	axs[0, 1].plot(radialPosition, cd, linewidth=2, label='Cd')
+	axs[0, 1].set_xlabel('Radial Position (r/R)')
+	axs[0, 1].set_ylabel('Coefficient [-]')
+	axs[0, 1].grid(True)
+	axs[0, 1].legend()
+
+	axs[1, 0].plot(radialPosition, clToCd, linewidth=2)
+	axs[1, 0].set_xlabel('Radial Position (r/R)')
+	axs[1, 0].set_ylabel('Cl/Cd [-]')
+	axs[1, 0].grid(True)
+
+	chordAxis = axs[1, 1]
+	clAxis = chordAxis.twinx()
+	chordLine = chordAxis.plot(radialPosition, chord, linewidth=2, color='tab:blue', label='Chord')
+	clLine = clAxis.plot(radialPosition, cl, linewidth=2, color='tab:orange', label='Cl')
+	chordAxis.set_xlabel('Radial Position (r/R)')
+	chordAxis.set_ylabel('Chord [m]', color='tab:blue')
+	clAxis.set_ylabel('Cl [-]', color='tab:orange')
+	chordAxis.tick_params(axis='y', labelcolor='tab:blue')
+	clAxis.tick_params(axis='y', labelcolor='tab:orange')
+	chordAxis.grid(True)
+	chordAxis.legend(chordLine + clLine, ['Chord', 'Cl'], loc='upper right')
+
+	fig.tight_layout()
+	return fig
+
+
+def SaveFigure(fig, outputPath: str):
+	"""
+	Save a matplotlib figure to disk.
+	"""
+	path = Path(outputPath)
+	path.parent.mkdir(parents=True, exist_ok=True)
+	fig.savefig(path, dpi=200, bbox_inches='tight')

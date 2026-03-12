@@ -332,26 +332,25 @@ def SolveBEM(solutionProperties:st.SolverData):
 		torque += dQCurrent * (radius[1] - radius[0]) # Integration
 
 		convergenceData = solutionProperties.getElementSolution(radiusIterator)
-		if convergenceData:
-			if DEBUG_PRINT: 
+		if DEBUG_PRINT:
+			if convergenceData:
 				print(f"Solution converged: {convergenceData.converged}, iterations: {convergenceData.iterations}, precision: {convergenceData.precision}")
-		else:
-			if DEBUG_PRINT: 
+			else:
 				print(f"No convergence data found for radius: {radiusIterator:.2f} m")
-		if DEBUG_PRINT: 
+
 			print(f"Differential thrust: {dTCurrent:.2f} N/m, Differential torque: {dQCurrent:.2f} Nm/m")
+			print("=" * 40)
+			print("Final results:")
+			print(f"Total thrust: {thrust:.2f} N, Total torque: {torque:.2f} Nm")
 
-
-	print("=" * 40)
-	print("Final results:")
-	print(f"Total thrust: {thrust:.2f} N, Total torque: {torque:.2f} Nm")
 	
 	# Calculate coefficient of power
 	rotorArea = np.pi * geometry.tipRadius**2
 	power = torque * geometry.rotationalSpeed  # Power = Torque * angular velocity
 	windPower = 0.5 * solutionProperties.airDensity * rotorArea * geometry.freeStreamVelocity**3  # Available wind power
 	cP = power / windPower if windPower > 0 else 0
-	print(f"Total power: {power:.2f} W, Coefficient of power cP: {cP:.4f}")
+	if DEBUG_PRINT:
+		print(f"Total power: {power:.2f} W, Coefficient of power cP: {cP:.4f}")
 
 	solutionProperties.result = st.Result(radius, dT, dQ, cP, thrust, torque)
 

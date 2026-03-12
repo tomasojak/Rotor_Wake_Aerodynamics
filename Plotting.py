@@ -15,6 +15,7 @@ def ApplyStyle(ax):
 	FONT_SIZE   = 11
 	LABEL_COLOR = "#222222"
 	GRID_COLOR  = "#cccccc"
+	LINE_WIDTH  = 1.5
 
 	# Tick and label font sizes
 	ax.tick_params(labelsize=FONT_SIZE - 1, colors=LABEL_COLOR)
@@ -33,7 +34,7 @@ def ApplyStyle(ax):
 
 	# Thicken all plotted lines
 	for line in ax.get_lines():
-		line.set_linewidth(2.0)
+		line.set_linewidth(LINE_WIDTH)
 
 	# Spine (border) color and weight
 	for spine in ax.spines.values():
@@ -129,7 +130,7 @@ def ShowPlots():
 	plt.show()
 
 ##### Task d #####
-def PlotResults(solution: st.SolverData):
+def PlotResults(solutions: list[st.SolverData]):
 	"""
 	Plot:
 	- a, a' distributions along the blade radial position
@@ -138,46 +139,75 @@ def PlotResults(solution: st.SolverData):
 	- Ct, Cn, Cq distribution along the blade radial position
 	"""
 
-	tipRadius = solution.geometry.tipRadius
-	radius = np.array([element.radius for element in solution.elementSolutions])
+	LINE_STYLES = [':', '--', '-']
+	LINE_COLOR  = "#222222"
+
+	tipRadius = solutions[0].geometry.tipRadius
+	radius = np.array([element.radius for element in solutions[0].elementSolutions])
 
 	radialPosition = radius / tipRadius
+	
+	fig1, ax1 = plt.subplots(1, 2)
 
 	# Plotting the induction factors
-	inductionFactors = np.array([element.a for element in solution.elementSolutions])
-	inductionFactorsPrime = np.array([element.aPrime for element in solution.elementSolutions])
+	for i, solution in enumerate(solutions):
+		inductionFactors = np.array([element.a for element in solution.elementSolutions])
+		inductionFactorsPrime = np.array([element.aPrime for element in solution.elementSolutions])
 
+		ax1[0].plot(radialPosition, inductionFactors, linestyle=LINE_STYLES[i], label=f'TSR={solution.geometry.tipSpeedRatio}', color=LINE_COLOR)
+		ax1[1].plot(radialPosition, inductionFactorsPrime, linestyle=LINE_STYLES[i], label=f"TSR={solution.geometry.tipSpeedRatio}", color=LINE_COLOR)
 
-	fig1, ax1 = plt.subplots()
-	ax1.plot(radialPosition, inductionFactors, label='Axial Induction Factor (a)')
-	ax1.plot(radialPosition, inductionFactorsPrime, label="Tangential Induction Factor (a')")
-	ax1.set_xlabel('Radial Position (r/R)')
-	ax1.set_ylabel('Induction Factor')
-	ApplyStyle(ax1)
+	ax1[0].set_xlabel('Radial Position (r/R)')
+	ax1[0].set_ylabel('Induction Factor')
+	ax1[0].set_title('Axial Induction Factor (a) vs Radial Position')
+	ApplyStyle(ax1[0])
+
+	ax1[1].set_xlabel('Radial Position (r/R)')
+	ax1[1].set_ylabel('Tangential Induction Factor')
+	ax1[1].set_title("Tangential Induction Factor (a') vs Radial Position")
+	ApplyStyle(ax1[1])
 
 	# Plotting the angle of attack and inflow angle
-	angleOfAttack = np.array([element.angleOfAttack for element in solution.elementSolutions])
-	inflowAngle = np.array([element.inflowAngle for element in solution.elementSolutions])
+	fig2, ax2 = plt.subplots(1, 2)
 
-	fig2, ax2 = plt.subplots()
-	ax2.plot(radialPosition, np.rad2deg(angleOfAttack), label='Angle of Attack (alpha)')
-	ax2.plot(radialPosition, np.rad2deg(inflowAngle), label='Inflow Angle (phi)')
-	ax2.set_xlabel('Radial Position (r/R)')
-	ax2.set_ylabel('Angle (degrees)')
-	ApplyStyle(ax2)
+	for i, solution in enumerate(solutions):
+		angleOfAttack = np.array([element.angleOfAttack for element in solution.elementSolutions])
+		inflowAngle = np.array([element.inflowAngle for element in solution.elementSolutions])
+
+		ax2[0].plot(radialPosition, np.rad2deg(angleOfAttack), linestyle=LINE_STYLES[i], label=f'TSR={solution.geometry.tipSpeedRatio}', color=LINE_COLOR)
+		ax2[1].plot(radialPosition, np.rad2deg(inflowAngle), linestyle=LINE_STYLES[i], label=f'TSR={solution.geometry.tipSpeedRatio}', color=LINE_COLOR)
+	ax2[0].set_xlabel('Radial Position (r/R)')
+	ax2[0].set_ylabel('Angle of Attack (degrees)')
+	ax2[0].set_title('Angle of Attack vs Radial Position')
+	ApplyStyle(ax2[0])
+	ax2[1].set_xlabel('Radial Position (r/R)')
+	ax2[1].set_ylabel('Inflow Angle (degrees)')
+	ax2[1].set_title('Inflow Angle vs Radial Position')
+	ApplyStyle(ax2[1])
 
 	# Plotting the force coefficients
-	Ct = np.array([element.dCt for element in solution.elementSolutions])
-	Cn = np.array([element.dCn for element in solution.elementSolutions])
-	Cq = np.array([element.dCq for element in solution.elementSolutions])
+	fig3, ax3 = plt.subplots(1, 3)
+	
+	for i, solution in enumerate(solutions):
+		Ct = np.array([element.dCt for element in solution.elementSolutions])
+		Cn = np.array([element.dCn for element in solution.elementSolutions])
+		Cq = np.array([element.dCq for element in solution.elementSolutions])
 
-	fig3, ax3 = plt.subplots()
-	ax3.plot(radialPosition, Ct, label='Thrust Coefficient (dCt)')
-	ax3.plot(radialPosition, Cn, label='Normal Force Coefficient (dCn)')
-	ax3.plot(radialPosition, Cq, label='Torque Coefficient (dCq)')
-	ax3.set_xlabel('Radial Position (r/R)')
-	ax3.set_ylabel('Coefficient')
-	ApplyStyle(ax3)
+		ax3[0].plot(radialPosition, Ct, linestyle=LINE_STYLES[i], label=f'TSR={solution.geometry.tipSpeedRatio}', color=LINE_COLOR)
+		ax3[1].plot(radialPosition, Cn, linestyle=LINE_STYLES[i], label=f'TSR={solution.geometry.tipSpeedRatio}', color=LINE_COLOR)
+		ax3[2].plot(radialPosition, Cq, linestyle=LINE_STYLES[i], label=f'TSR={solution.geometry.tipSpeedRatio}', color=LINE_COLOR)
+	ax3[0].set_xlabel('Radial Position (r/R)')
+	ax3[0].set_ylabel('Ct')
+	ax3[0].set_title('Thrust Coefficient (Ct) vs Radial Position')
+	ApplyStyle(ax3[0])
+	ax3[1].set_xlabel('Radial Position (r/R)')
+	ax3[1].set_ylabel('Cn')
+	ax3[1].set_title('Normal Force Coefficient (Cn) vs Radial Position')
+	ApplyStyle(ax3[1])
+	ax3[2].set_xlabel('Radial Position (r/R)')
+	ax3[2].set_ylabel('Cq')
+	ax3[2].set_title('Torque Coefficient (Cq) vs Radial Position')
+	ApplyStyle(ax3[2])
 
 ##### Task e #####
 def TipCorrectionPlot(solution: st.SolverData):

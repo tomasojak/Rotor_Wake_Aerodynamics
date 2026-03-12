@@ -7,6 +7,8 @@ import Plotting
 import numpy as np
 import BEM
 
+TSRs = np.array([6.0, 8.0, 10.0])
+
 def plot_pitch_variations():	# Deprecated
 	# Pitch as a function of radius
 	localSolution = st.SolverData()
@@ -56,16 +58,19 @@ def plot_pitch_variations():	# Deprecated
 	Plotting.plot_pitch_variations(radiusGrid, pitchGrid, cPMap)
 
 def PartD():
-	solution = st.SolverData()
-	solution.setParameters(
-		maxIterations=500,
-		tolerance=1e-6,
-		relaxation=0.5,
-		elementCount=100
-	)
-	solution.geometry.tipSpeedRatio = 8.0
-	BEM.SolveBEM(solution)
-	Plotting.PlotResults(solution)
+	solutions = []
+	for tipSpeedRatio in TSRs:
+		solution = st.SolverData()
+		solution.setParameters(
+			maxIterations=500,
+			tolerance=1e-6,
+			relaxation=0.5,
+			elementCount=100
+		)
+		solution.geometry.tipSpeedRatio = tipSpeedRatio
+		BEM.SolveBEM(solution)
+		solutions.append(solution)
+	Plotting.PlotResults(solutions)
 
 def PartF():
 	# Prepare solutions for various numbers of annuli:
@@ -94,6 +99,6 @@ if __name__ == "__main__":
 	PartD()
 
 	#### Part f ####
-	PartF()
+	# PartF()
 
 	Plotting.ShowPlots()

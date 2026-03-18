@@ -92,18 +92,18 @@ class IterationSolution:
 	"""
 
     def __init__(self,
-                 radius,
-                 a,
-                 aPrime,
-                 iterations,
-                 precision,
-                 tolerance,
-                 prandtlCorrection,
-                 angleOfAttack,
-                 inflowAngle,
-                 dCt,
-                 dCn,
-                 dCq):
+                radius,
+                a,
+                aPrime,
+                iterations,
+                precision,
+                tolerance,
+                prandtlCorrection,
+                angleOfAttack,
+                inflowAngle,
+                dCt,
+                dCn,
+                dCq):
         self.radius = radius
         self.a = a
         self.aPrime = aPrime
@@ -154,9 +154,9 @@ class SolverData:
         self.tolerance = 1e-6
         self.relaxation = 0.25
         self.elementCount = 10
-        self.tipMarginFraction = 0.0
+        self.tipMarginFraction = 0.0 # FIX: Only use is to subtract zero from a number? Remove or make it usefful
         self.spacingMethod = "constant"
-        self.usePrandtlCorrection = True
+        self.usePrandtlCorrection = True # FIX: We are never setting it to False, why do we need it?
         self.verboseOutput = True
 
         self.initialGuess = {
@@ -164,7 +164,7 @@ class SolverData:
             "aPrime": 0.0
         }
 
-        self.result = Result(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        self.result = Result(0.0, 0.0, 0.0, 0.0, 0.0, 0.0) # NOTE: For Tomas, I hate this, make it redable (maybe a default constructor)
 
     def setParameters(self, maxIterations, tolerance, relaxation, elementCount):
         """

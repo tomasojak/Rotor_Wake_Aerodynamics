@@ -124,7 +124,7 @@ def generate_task_d_outputs(solutions: list[st.SolverData]) -> None:
 		"",
 		"Key observations:",
 		f"- As TSR increases from {TSR_VALUES[0]:.0f} to {TSR_VALUES[-1]:.0f}, both thrust and power increase for the baseline rotor.",
-		f"- The axial induction is highest near the root and tip, with the mid-span carrying the most uniform loading.",
+		f"- The axial induction is highest near the root and tip, with the mid-span carrying the most uniform loading.", # FIX: f-strign without placeholders
 		f"- The inflow angle decreases with radius, while the angle of attack remains in a moderate operating range over most of the blade.",
 		"- Azimuthal induction stays much smaller than axial induction for this turbine case.",
 	]

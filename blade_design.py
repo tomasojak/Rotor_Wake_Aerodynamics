@@ -36,7 +36,7 @@ def baseline_chord(geometry: st.Geometry, radius: float) -> float:
     return 3.0 * (1 - geometry.dimensionlessRadialPosition(radius)) + 1.0
 
 
-def thrust_coefficient(solution: st.SolverData) -> float:
+def thrust_coefficient(solution: st.SolverData) -> float: # FIX: feel free to make this a method of SolverData
     rotor_area = np.pi * solution.geometry.tipRadius ** 2
     denominator = 0.5 * solution.airDensity * rotor_area * solution.geometry.freeStreamVelocity ** 2
     return solution.result.totalThrust / denominator
@@ -59,7 +59,7 @@ class DesignEvaluation:
     torque: float
 
 
-def spanwise_data(evaluation: DesignEvaluation) -> dict[str, np.ndarray]:
+def spanwise_data(evaluation: DesignEvaluation) -> dict[str, np.ndarray]: # FIX: could be a method of design evaluation
     solution = evaluation.solution
     radial = solution.result.radius / solution.geometry.tipRadius
     alpha = np.rad2deg(np.array([element.angleOfAttack for element in solution.elementSolutions]))
@@ -83,11 +83,11 @@ def spanwise_data(evaluation: DesignEvaluation) -> dict[str, np.ndarray]:
 
 def evaluate_design(
     pitch_deg: float,
-    twist_scale: float = 1.0,
+    twist_scale: float = 1.0, # FIX: No need to clutter with type hints that are obvious
     label: str = "",
     element_count: int = 80,
-    spacing_method: str = "cosine"
-) -> DesignEvaluation:
+    spacing_method: str = "cosine") -> DesignEvaluation:
+
     solution = st.SolverData()
     solution.setParameters(
         maxIterations=300,
@@ -111,10 +111,9 @@ def evaluate_design(
         twist_scale=twist_scale,
         solution=solution,
         ct=thrust_coefficient(solution),
-        cp=solution.result.cP,
+        cp=solution.result.cP, # FIX: why are you storing solution and then also its member variables separately?
         thrust=solution.result.totalThrust,
-        torque=solution.result.totalTorque,
-    )
+        torque=solution.result.totalTorque)
 
 
 def solve_pitch_for_target_ct(
@@ -130,14 +129,15 @@ def solve_pitch_for_target_ct(
     lower_eval = evaluate_design(lower_pitch, twist_scale, label=f"{label_prefix}_lower", element_count=element_count)
     upper_eval = evaluate_design(upper_pitch, twist_scale, label=f"{label_prefix}_upper", element_count=element_count)
 
-    expand_counter = 0
+    expand_counter = 0 # FIX: Thi smight need a comment, I do not understand what it does
     while not (lower_eval.ct >= target_ct >= upper_eval.ct):
         if expand_counter > 8:
             raise RuntimeError(
                 f"Could not bracket CT={target_ct:.3f} for twist scale {twist_scale:.3f}. "
                 f"Bounds gave CT {lower_eval.ct:.4f} and {upper_eval.ct:.4f}."
             )
-        lower_pitch -= 2.0
+        # FIX: Am I reading it right that the 'bounds' are actually the initial values? You seem to increase the bounds on each pass
+        lower_pitch -= 2.0 # FIX: Explain why those numbers were chosen
         upper_pitch += 2.0
         lower_eval = evaluate_design(lower_pitch, twist_scale, label=f"{label_prefix}_lower", element_count=element_count)
         upper_eval = evaluate_design(upper_pitch, twist_scale, label=f"{label_prefix}_upper", element_count=element_count)
@@ -174,7 +174,7 @@ def run_stage_a() -> DesignEvaluation:
 
 
 def run_stage_b() -> tuple[DesignEvaluation, list[DesignEvaluation]]:
-    coarse_scales = np.linspace(0.75, 1.25, 13)
+    coarse_scales = np.linspace(0.75, 1.25, 13) # FIX: Explain how those numbers were chosen, and why 13 points
     coarse_results = [
         solve_pitch_for_target_ct(
             TARGET_CT,
@@ -193,7 +193,7 @@ def run_stage_b() -> tuple[DesignEvaluation, list[DesignEvaluation]]:
             TARGET_CT,
             twist_scale=scale,
             label_prefix=f"stage_b_fine_{index}",
-            element_count=80)
+            element_count=80) # FIX: 80 is the default, no need to add noise
         for index, scale in enumerate(fine_scales)
     ]
 
@@ -237,7 +237,9 @@ def save_spanwise_design_csv(path: Path, evaluation: DesignEvaluation) -> None:
                 f"{solution.result.dQ[index]:.6f},{data['chord'][index]:.6f},{data['twist'][index]:.6f}\n"
             )
 
-
+# FIX: There is a separate file for plotting, use it.
+# What follows is 400 lines that could be spared from this file
+# It is much easier to look at the logic and then go to the plotting file to see how it is plotted
 def plot_cp_vs_twist_scale(stage_b_results: list[DesignEvaluation]):
     ordered = sorted(stage_b_results, key=lambda evaluation: evaluation.twist_scale)
     scales = np.array([evaluation.twist_scale for evaluation in ordered])
@@ -486,7 +488,7 @@ def stagnation_pressure_profiles(evaluation: DesignEvaluation) -> dict[str, np.n
     dynamic_pressure = 0.5 * air_density * free_stream_velocity ** 2
     a = data["a"]
 
-    disk_velocity = free_stream_velocity * (1 - a)
+    disk_velocity = free_stream_velocity * (1 - a) # FIX: unused
     wake_velocity = free_stream_velocity * np.maximum(1 - 2 * a, 0.0)
 
     p0_upstream = np.full_like(a, dynamic_pressure)
@@ -555,7 +557,7 @@ def write_report_task_notes(task_dir: Path, filename: str, lines: list[str]) -> 
     (task_dir / filename).write_text("\n".join(lines), encoding="ascii")
 
 
-def generate_task_g_outputs(
+def generate_task_g_outputs( # FIX: Move to main.py
     baseline: DesignEvaluation,
     stage_a: DesignEvaluation,
     stage_b: DesignEvaluation,
@@ -639,7 +641,7 @@ def generate_task_i_outputs(baseline: DesignEvaluation, stage_b: DesignEvaluatio
     write_report_task_notes(task_dir, "i_notes.md", notes)
 
 
-def run_point_2_report_tasks(
+def run_point_2_report_tasks( # FIX: Move to main
     baseline: DesignEvaluation,
     stage_a: DesignEvaluation,
     stage_b: DesignEvaluation,

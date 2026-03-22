@@ -2,8 +2,8 @@
 # BEM Assignment
 #
 # Authors: - Tomas Jakus
-#          - 
-#          - 
+#          - Codrin Chilea
+#          - Sava Zamfirescu
 #
 
 # This file contains the wind-turbine BEM implementation used for the
@@ -164,15 +164,6 @@ def SolveInduction(
     """
 	Iteratively solve for induction factors at a given radial position.
 
-	The update sequence matches the course slides:
-	1. Start from the previous annulus solution when available.
-	2. Evaluate blade-element loads with the current a and a'.
-	3. Convert annulus thrust into CT and update a through the
-	   momentum/Glauert relation.
-	4. Apply Prandtl correction.
-	5. Update a' from the azimuthal load balance.
-	6. Relax and repeat until convergence.
-
 	Args:
 		radius: Radial position along the blade (m)
 		annulusWidth: Width of the current annulus (m)
@@ -295,8 +286,6 @@ def solveElement(radius: float, annulusWidth: float, solutionProperties: st.Solv
 
 def SolveBEM(solutionProperties: st.SolverData):
     """
-	Solve the complete BEM problem for all radial stations.
-
 	Iterates over annulus-center radial positions, solves the local induction
 	factors, evaluates sectional loads, and integrates thrust and torque to
 	obtain the total rotor performance.
@@ -306,7 +295,7 @@ def SolveBEM(solutionProperties: st.SolverData):
 			and will be updated with results
 
 	Returns:
-		None (results are stored in solutionProperties.result)
+		results are stored in solutionProperties.result
 	"""
     geometry = solutionProperties.geometry
 

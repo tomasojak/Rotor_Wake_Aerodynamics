@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 import SolverTools as st
 from pathlib import Path
 
+plt.rcParams['figure.max_open_warning'] = 0
+
 def plot_bem_results(radius, elementSolutions):
 	"""
 	Plot the main BEM results including thrust/torque distributions and convergence metrics.
@@ -253,17 +255,17 @@ def PlotAnglesComparison(solutions: list[st.SolverData]):
 		radial = solution.result.radius / solution.geometry.tipRadius
 		alpha = np.rad2deg(np.array([element.angleOfAttack for element in solution.elementSolutions]))
 		phi = np.rad2deg(np.array([element.inflowAngle for element in solution.elementSolutions]))
-		label = f"TSR {solution.geometry.tipSpeedRatio:.0f}"
+		label = f"TSR = {solution.geometry.tipSpeedRatio:.0f}"
 		axs[0].plot(radial, alpha, linewidth=2, label=label)
 		axs[1].plot(radial, phi, linewidth=2, label=label)
 
-	axs[0].set_xlabel('Radial Position (r/R)')
-	axs[0].set_ylabel('Angle of Attack [deg]')
+	axs[0].set_xlabel('r/R [-]')
+	axs[0].set_ylabel('alpha [deg]')
 	axs[0].grid(True)
 	axs[0].legend()
 
-	axs[1].set_xlabel('Radial Position (r/R)')
-	axs[1].set_ylabel('Inflow Angle [deg]')
+	axs[1].set_xlabel('r/R [-]')
+	axs[1].set_ylabel('phi [deg]')
 	axs[1].grid(True)
 	axs[1].legend()
 
@@ -278,17 +280,17 @@ def PlotInductionComparison(solutions: list[st.SolverData]):
 		radial = solution.result.radius / solution.geometry.tipRadius
 		a = np.array([element.a for element in solution.elementSolutions])
 		aPrime = np.array([element.aPrime for element in solution.elementSolutions])
-		label = f"TSR {solution.geometry.tipSpeedRatio:.0f}"
+		label = f"TSR = {solution.geometry.tipSpeedRatio:.0f}"
 		axs[0].plot(radial, a, linewidth=2, label=label)
 		axs[1].plot(radial, aPrime, linewidth=2, label=label)
 
-	axs[0].set_xlabel('Radial Position (r/R)')
-	axs[0].set_ylabel('Axial Induction a [-]')
+	axs[0].set_xlabel('r/R [-]')
+	axs[0].set_ylabel('a [-]')
 	axs[0].grid(True)
 	axs[0].legend()
 
-	axs[1].set_xlabel('Radial Position (r/R)')
-	axs[1].set_ylabel("Azimuthal Induction a' [-]")
+	axs[1].set_xlabel('r/R [-]')
+	axs[1].set_ylabel("a' [-]")
 	axs[1].grid(True)
 	axs[1].legend()
 
@@ -297,23 +299,32 @@ def PlotInductionComparison(solutions: list[st.SolverData]):
 
 
 def PlotLoadingComparison(solutions: list[st.SolverData]):
-	fig, axs = plt.subplots(1, 2, figsize=(12, 4.5))
-	fig.suptitle('Task d.c: Spanwise Load Distributions')
+	fig, axs = plt.subplots(1, 3, figsize=(15, 4.5))
+	fig.suptitle('Task d.c: Spanwise Coefficients Cn, Ct, Cq')
 	for solution in solutions:
 		radial = solution.result.radius / solution.geometry.tipRadius
-		label = f"TSR {solution.geometry.tipSpeedRatio:.0f}"
-		axs[0].plot(radial, solution.result.dT, linewidth=2, label=label)
-		axs[1].plot(radial, solution.result.dQ, linewidth=2, label=label)
+		cn = np.array([element.axialForceCoefficient for element in solution.elementSolutions])
+		ct = np.array([element.azimuthalForceCoefficient for element in solution.elementSolutions])
+		cq = ct * radial
+		label = f"TSR = {solution.geometry.tipSpeedRatio:.0f}"
+		axs[0].plot(radial, cn, linewidth=2, label=label)
+		axs[1].plot(radial, ct, linewidth=2, label=label)
+		axs[2].plot(radial, cq, linewidth=2, label=label)
 
-	axs[0].set_xlabel('Radial Position (r/R)')
-	axs[0].set_ylabel('Thrust Loading dT [N/m]')
+	axs[0].set_xlabel('r/R [-]')
+	axs[0].set_ylabel('Cn [-]')
 	axs[0].grid(True)
 	axs[0].legend()
 
-	axs[1].set_xlabel('Radial Position (r/R)')
-	axs[1].set_ylabel('Azimuthal Loading dQ [Nm/m]')
+	axs[1].set_xlabel('r/R [-]')
+	axs[1].set_ylabel('Ct [-]')
 	axs[1].grid(True)
 	axs[1].legend()
+
+	axs[2].set_xlabel('r/R [-]')
+	axs[2].set_ylabel('Cq [-]')
+	axs[2].grid(True)
+	axs[2].legend()
 
 	fig.tight_layout()
 	return fig
@@ -473,7 +484,7 @@ def PlotSpacingDistribution(constantEdges: np.ndarray, cosineEdges: np.ndarray):
 
 
 def PlotAirfoilOperationalPolar(alphaPolarDeg, clPolar, cdPolar, caseAlphaDeg, caseCl, caseCd, radialPosition):
-	fig, axs = plt.subplots(1, 2, figsize=(12, 4.5))
+	fig, axs = plt.subplots(1, 2, figsize=(12, 4.5), constrained_layout=True)
 	fig.suptitle('Task j: Airfoil Operational Points for Selected Baseline Case')
 
 	scatter = axs[0].scatter(caseAlphaDeg, caseCl, c=radialPosition, cmap='viridis', s=25, label='Operating points')
@@ -492,8 +503,6 @@ def PlotAirfoilOperationalPolar(alphaPolarDeg, clPolar, cdPolar, caseAlphaDeg, c
 
 	colorbar = fig.colorbar(scatter, ax=axs, shrink=0.9)
 	colorbar.set_label('Radial Position r/R [-]')
-
-	fig.tight_layout()
 	return fig
 
 
@@ -534,10 +543,282 @@ def PlotAirfoilSpanwise(radialPosition, alphaDeg, cl, cd, clToCd, chord):
 	return fig
 
 
+def _DesignSpanwiseData(evaluation):
+	solution = evaluation.solution
+	radial = solution.result.radius / solution.geometry.tipRadius
+	alpha = np.rad2deg(np.array([element.angleOfAttack for element in solution.elementSolutions]))
+	phi = np.rad2deg(np.array([element.inflowAngle for element in solution.elementSolutions]))
+	a = np.array([element.a for element in solution.elementSolutions])
+	aPrime = np.array([element.aPrime for element in solution.elementSolutions])
+	chord = np.array([solution.geometry.chordFunction(radius) for radius in solution.result.radius])
+	twist = np.array([solution.geometry.bladeTwist(radius) for radius in solution.result.radius])
+	return {
+		"radial": radial,
+		"alpha": alpha,
+		"phi": phi,
+		"a": a,
+		"a_prime": aPrime,
+		"dT": solution.result.dT,
+		"dQ": solution.result.dQ,
+		"chord": chord,
+		"twist": twist,
+	}
+
+
+def PlotDesignSearchVsTwist(stageBResults):
+	ordered = sorted(stageBResults, key=lambda evaluation: evaluation.twist_scale)
+	scales = np.array([evaluation.twist_scale for evaluation in ordered])
+	cp = np.array([evaluation.cp for evaluation in ordered])
+	pitch = np.array([evaluation.pitch_deg for evaluation in ordered])
+
+	fig, axs = plt.subplots(1, 2, figsize=(12, 4.5))
+	fig.suptitle('Point 2 Stage B: Twist-Scale Search at CT = 0.75')
+
+	axs[0].plot(scales, cp, linewidth=2)
+	axs[0].set_xlabel('Twist Scale [-]')
+	axs[0].set_ylabel('CP [-]')
+	axs[0].grid(True)
+
+	axs[1].plot(scales, pitch, linewidth=2)
+	axs[1].set_xlabel('Twist Scale [-]')
+	axs[1].set_ylabel('Required Pitch [deg]')
+	axs[1].grid(True)
+
+	fig.tight_layout()
+	return fig
+
+
+def PlotDesignSearchVsChord(stageCResults):
+	ordered = sorted(stageCResults, key=lambda evaluation: evaluation.chord_scale)
+	scales = np.array([evaluation.chord_scale for evaluation in ordered])
+	cp = np.array([evaluation.cp for evaluation in ordered])
+	pitch = np.array([evaluation.pitch_deg for evaluation in ordered])
+
+	fig, axs = plt.subplots(1, 2, figsize=(12, 4.5))
+	fig.suptitle('Point 2 Stage C: Chord-Scale Search at CT = 0.75')
+
+	axs[0].plot(scales, cp, linewidth=2)
+	axs[0].set_xlabel('Chord Scale [-]')
+	axs[0].set_ylabel('CP [-]')
+	axs[0].grid(True)
+
+	axs[1].plot(scales, pitch, linewidth=2)
+	axs[1].set_xlabel('Chord Scale [-]')
+	axs[1].set_ylabel('Required Pitch [deg]')
+	axs[1].grid(True)
+
+	fig.tight_layout()
+	return fig
+
+
+def PlotDesignComparison(baseline, stageA, stageB, stageC):
+	fig, axs = plt.subplots(2, 2, figsize=(12, 8))
+	fig.suptitle('Point 2: Baseline vs Stage A/B/C at TSR = 8')
+
+	evaluations = [baseline, stageA, stageB, stageC]
+	labels = ['Baseline', 'Stage A', 'Stage B', 'Stage C']
+
+	for evaluation, label in zip(evaluations, labels):
+		data = _DesignSpanwiseData(evaluation)
+		axs[0, 0].plot(data["radial"], data["alpha"], linewidth=2, label=label)
+		axs[0, 1].plot(data["radial"], data["a"], linewidth=2, label=label)
+		axs[1, 0].plot(data["radial"], data["dT"], linewidth=2, label=label)
+		axs[1, 1].plot(data["radial"], data["dQ"], linewidth=2, label=label)
+
+	axs[0, 0].set_xlabel('Radial Position (r/R)')
+	axs[0, 0].set_ylabel('Angle of Attack [deg]')
+	axs[0, 0].grid(True)
+	axs[0, 0].legend()
+
+	axs[0, 1].set_xlabel('Radial Position (r/R)')
+	axs[0, 1].set_ylabel('Axial Induction a [-]')
+	axs[0, 1].grid(True)
+	axs[0, 1].legend()
+
+	axs[1, 0].set_xlabel('Radial Position (r/R)')
+	axs[1, 0].set_ylabel('Thrust Loading dT [N/m]')
+	axs[1, 0].grid(True)
+	axs[1, 0].legend()
+
+	axs[1, 1].set_xlabel('Radial Position (r/R)')
+	axs[1, 1].set_ylabel('Azimuthal Loading dQ [Nm/m]')
+	axs[1, 1].grid(True)
+	axs[1, 1].legend()
+
+	fig.tight_layout()
+	return fig
+
+
+def PlotDesignDistributions(baseline, stageA, stageB, stageC):
+	fig, axs = plt.subplots(1, 2, figsize=(12, 4.5))
+	fig.suptitle('Point 2: Blade-Design Distributions')
+
+	evaluations = [baseline, stageA, stageB, stageC]
+	labels = ['Baseline', 'Stage A', 'Stage B', 'Stage C']
+	for evaluation, label in zip(evaluations, labels):
+		data = _DesignSpanwiseData(evaluation)
+		axs[0].plot(data["radial"], data["twist"], linewidth=2, label=label)
+		axs[1].plot(data["radial"], data["chord"], linewidth=2, label=label)
+
+	axs[0].set_xlabel('Radial Position (r/R)')
+	axs[0].set_ylabel('Twist [deg]')
+	axs[0].grid(True)
+	axs[0].legend()
+
+	axs[1].set_xlabel('Radial Position (r/R)')
+	axs[1].set_ylabel('Chord [m]')
+	axs[1].grid(True)
+	axs[1].legend()
+
+	fig.tight_layout()
+	return fig
+
+
+def PlotDesignSummaryTable(baseline, stageA, stageB, stageC, targetCt: float, actuatorCp: float):
+	rows = [
+		['Baseline', f'{baseline.pitch_deg:.3f}', f'{baseline.twist_scale:.3f}', f'{baseline.chord_scale:.3f}', f'{baseline.ct:.4f}', f'{baseline.cp:.4f}'],
+		['Stage A', f'{stageA.pitch_deg:.3f}', f'{stageA.twist_scale:.3f}', f'{stageA.chord_scale:.3f}', f'{stageA.ct:.4f}', f'{stageA.cp:.4f}'],
+		['Stage B', f'{stageB.pitch_deg:.3f}', f'{stageB.twist_scale:.3f}', f'{stageB.chord_scale:.3f}', f'{stageB.ct:.4f}', f'{stageB.cp:.4f}'],
+		['Stage C', f'{stageC.pitch_deg:.3f}', f'{stageC.twist_scale:.3f}', f'{stageC.chord_scale:.3f}', f'{stageC.ct:.4f}', f'{stageC.cp:.4f}'],
+		['Actuator disk', '-', '-', '-', f'{targetCt:.4f}', f'{actuatorCp:.4f}'],
+	]
+
+	fig, ax = plt.subplots(figsize=(10, 3.2))
+	ax.axis('off')
+	table = ax.table(
+		cellText=rows,
+		colLabels=['Case', 'Pitch [deg]', 'Twist Scale [-]', 'Chord Scale [-]', 'CT [-]', 'CP [-]'],
+		loc='center')
+	table.auto_set_font_size(False)
+	table.set_fontsize(10)
+	table.scale(1, 1.5)
+	fig.tight_layout()
+	return fig
+
+
+def PlotFinalDesignPerformance(baseline, redesign):
+	baselineData = _DesignSpanwiseData(baseline)
+	redesignData = _DesignSpanwiseData(redesign)
+
+	fig, axs = plt.subplots(3, 2, figsize=(12, 10))
+	fig.suptitle('Task h: Baseline vs Final Redesign Performance at TSR = 8')
+
+	series = [
+		(axs[0, 0], "alpha", 'Angle of Attack [deg]'),
+		(axs[0, 1], "phi", 'Inflow Angle [deg]'),
+		(axs[1, 0], "a", 'Axial Induction a [-]'),
+		(axs[1, 1], "a_prime", "Azimuthal Induction a' [-]"),
+		(axs[2, 0], "dT", 'Thrust Loading dT [N/m]'),
+		(axs[2, 1], "dQ", 'Azimuthal Loading dQ [Nm/m]'),
+	]
+
+	for axis, key, ylabel in series:
+		axis.plot(baselineData["radial"], baselineData[key], linewidth=2, label='Baseline')
+		axis.plot(redesignData["radial"], redesignData[key], linewidth=2, label='Final redesign')
+		axis.set_xlabel('Radial Position (r/R)')
+		axis.set_ylabel(ylabel)
+		axis.grid(True)
+		axis.legend()
+
+	fig.tight_layout()
+	return fig
+
+
+def PlotFinalDesignGeometry(baseline, redesign):
+	baselineData = _DesignSpanwiseData(baseline)
+	redesignData = _DesignSpanwiseData(redesign)
+
+	fig, axs = plt.subplots(1, 2, figsize=(12, 4.5))
+	fig.suptitle('Task h: Baseline vs Final Redesign Geometry')
+
+	axs[0].plot(baselineData["radial"], baselineData["twist"], linewidth=2, label='Baseline')
+	axs[0].plot(redesignData["radial"], redesignData["twist"], linewidth=2, label='Final redesign')
+	axs[0].set_xlabel('Radial Position (r/R)')
+	axs[0].set_ylabel('Twist [deg]')
+	axs[0].grid(True)
+	axs[0].legend()
+
+	axs[1].plot(baselineData["radial"], baselineData["chord"], linewidth=2, label='Baseline')
+	axs[1].plot(redesignData["radial"], redesignData["chord"], linewidth=2, label='Final redesign')
+	axs[1].set_xlabel('Radial Position (r/R)')
+	axs[1].set_ylabel('Chord [m]')
+	axs[1].grid(True)
+	axs[1].legend()
+
+	fig.tight_layout()
+	return fig
+
+
+def PlotFinalDesignOperatingPoints(baseline, redesign):
+	airfoil = redesign.solution.geometry.airfoil
+	alphaPolarDeg = np.rad2deg(airfoil.alpha)
+
+	baselineData = _DesignSpanwiseData(baseline)
+	redesignData = _DesignSpanwiseData(redesign)
+
+	baselineAlphaRad = np.deg2rad(baselineData["alpha"])
+	redesignAlphaRad = np.deg2rad(redesignData["alpha"])
+	baselineCl = np.array([airfoil.lookup(alpha, 'cl') for alpha in baselineAlphaRad])
+	baselineCd = np.array([airfoil.lookup(alpha, 'cd') for alpha in baselineAlphaRad])
+	redesignCl = np.array([airfoil.lookup(alpha, 'cl') for alpha in redesignAlphaRad])
+	redesignCd = np.array([airfoil.lookup(alpha, 'cd') for alpha in redesignAlphaRad])
+
+	fig, axs = plt.subplots(1, 2, figsize=(12, 4.5))
+	fig.suptitle('Task h: Airfoil Operating Points for Baseline and Final Redesign')
+
+	axs[0].plot(alphaPolarDeg, airfoil.cl, linewidth=2, color='tab:blue', label='Polar')
+	axs[0].scatter(baselineData["alpha"], baselineCl, s=20, label='Baseline')
+	axs[0].scatter(redesignData["alpha"], redesignCl, s=20, label='Final redesign')
+	axs[0].set_xlabel('Angle of Attack [deg]')
+	axs[0].set_ylabel('Lift Coefficient Cl [-]')
+	axs[0].grid(True)
+	axs[0].legend()
+
+	axs[1].plot(alphaPolarDeg, airfoil.cd, linewidth=2, color='tab:red', label='Polar')
+	axs[1].scatter(baselineData["alpha"], baselineCd, s=20, label='Baseline')
+	axs[1].scatter(redesignData["alpha"], redesignCd, s=20, label='Final redesign')
+	axs[1].set_xlabel('Angle of Attack [deg]')
+	axs[1].set_ylabel('Drag Coefficient Cd [-]')
+	axs[1].grid(True)
+	axs[1].legend()
+
+	fig.tight_layout()
+	return fig
+
+
+def PlotStagnationPressureDistribution(baselinePressure: dict, redesignPressure: dict):
+	fig, axs = plt.subplots(1, 2, figsize=(12, 4.5))
+	fig.suptitle('Task i: Stagnation Pressure Distribution for the Final Redesign')
+
+	axs[0].plot(redesignPressure["radial"], redesignPressure["p0_upstream_star"], linewidth=2, label='1: Far upstream')
+	axs[0].plot(redesignPressure["radial"], redesignPressure["p0_before_disk_star"], linewidth=2, linestyle='--', label='2: Before disk')
+	axs[0].plot(redesignPressure["radial"], redesignPressure["p0_after_disk_star"], linewidth=2, label='3: After disk')
+	axs[0].plot(redesignPressure["radial"], redesignPressure["p0_far_wake_star"], linewidth=2, linestyle='--', label='4: Far wake')
+	axs[0].set_xlabel('Radial Position (r/R)')
+	axs[0].set_ylabel('Normalized Stagnation Pressure [-]')
+	axs[0].grid(True)
+	axs[0].legend()
+
+	axs[1].plot(baselinePressure["radial"], baselinePressure["p0_after_disk_star"], linewidth=2, label='Baseline')
+	axs[1].plot(redesignPressure["radial"], redesignPressure["p0_after_disk_star"], linewidth=2, label='Final redesign')
+	axs[1].set_xlabel('Radial Position (r/R)')
+	axs[1].set_ylabel('Wake Stagnation Pressure [-]')
+	axs[1].grid(True)
+	axs[1].legend()
+
+	fig.tight_layout()
+	return fig
+
+
 def SaveFigure(fig, outputPath: str):
 	"""
 	Save a matplotlib figure to disk.
 	"""
+	if fig._suptitle is not None:
+		fig._suptitle.set_text('')
+	for axis in fig.axes:
+		axis.set_title('')
+
 	path = Path(outputPath)
 	path.parent.mkdir(parents=True, exist_ok=True)
 	fig.savefig(path, dpi=200, bbox_inches='tight')
